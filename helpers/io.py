@@ -292,6 +292,7 @@ class SpecimenFileError(Exception):
     """
     pass
 
+
 class DataInconsistentError(Exception):
     """
     Raised by a `FreqSweepTest` object if the data loaded for a frequency sweep
@@ -1528,7 +1529,12 @@ class SweepTest:
     contain an axis of length 1 for the trial index `t_n`.
     """
     
-    def __init__(self, raw_data=None, columns=":,y0", names=None):
+    def __init__(
+        self: SweepTest,
+        raw_data: np.ndarray = None,
+        columns: str = ":,y0",
+        names: typing.Union[None, list[typing.Union[str, None], ...]] = None,
+    ):
         """Create a SweepTest instance.
         
         Create a `SweepTest` instance, optionally parsing the data in array
@@ -1539,8 +1545,11 @@ class SweepTest:
         ----------
         `raw_data` : `numpy.ndarray` or `None`
             2D array containing the sweep data.
-        `columns` : `str` or `None` (optional, default: ":,y0")
+        `columns`: `str` or `None` (optional, default: ":,y0")
             Column specifier string. See `load` for details.
+        `names`: `list[str or None, ...]` or `None` (optional, default: `None`)
+            List of names assigned to each of the columns in `raw_data`. See
+            `load` for details.
         """
         
         # Create collections so that the IndependentVariable and
@@ -1567,8 +1576,8 @@ class SweepTest:
         self: SweepTest,
         raw_data: np.ndarray,
         columns: str = ":,y0",
-        names: typing.Union[list[typing.Union[str, NoneType], ...]] = None
-    ) -> NoneType:
+        names: typing.Union[None, list[typing.Union[str, None], ...]] = None,
+    ) -> None:
         """Load data from 2D array and parse variable names.
         
         This method creates independent and dependent variables using the data
@@ -1617,24 +1626,31 @@ class SweepTest:
         `names` : `list[Union[str, NoneType]]` or `None`
             List of names associated with each independent and dependent
             variable. If specified, must have `len()` equal to the number of
-            columns in `raw_data`. Any
+            columns in `raw_data`. If `names[i] is None`, the corresponding
+            independent or dependent variable will be automatically assigned the
+            name `f"_Col{i}"`. If `names is None`, all variables will receive
+            automatic names.
+        
+        Raises
+        ------
+        `KeyError`
+            - if any of `names` are not unique
+        `ValueError`
+            - if `columns` is not a valid column specification
+            - if `names is not None` and `len(names)` does not equal the number
+              of fixed (non-expand) specifiers in `columns`
         """
-        #TODO: rewrite internals so they don't depend on self.names, to allow
-        #      loading data with no headings
         
-        # Parse the column specification
-        col_spec = self._parse_col_spec(columns)
-        
-        # Load the data from file
-        raw_data, hdgs = load_data(filename, src="exp")
-        if col_spec is None:
-            y = ("R", "Theta", "StdDev")
-            cols = ",".join([("y" if h in y else "x") for h in hdgs])
-            col_spec = self._parse_col_spec(cols)
-        logger.debug("col_spec = " + str(col_spec[0]))
+        # # Old behavior: load the data from file
+        # raw_data, hdgs = load_data(filename, src="exp")
+        # if col_spec is None:
+            # y = ("R", "Theta", "StdDev")
+            # cols = ",".join([("y" if h in y else "x") for h in hdgs])
+            # col_spec = self._parse_col_spec(cols)
+        # logger.debug("col_spec = " + str(col_spec[0]))
         
         # Create variables
-        self._create_vars(col_spec, raw_data, hdgs)
+        self._create_vars(self._parse_col_spec(columns), raw_data, names)
         
         # Determine `M_n` and `T_n` for each variable
         self._calc_sweep_limits(raw_data)
@@ -1915,106 +1931,107 @@ class SweepTest:
             var._mult = prev_multiplicity
             logger.debug("Var "+var.name+": Tn="+str(Tn)+", Mn="+str(Mn))
     
-    def _create_vars(self, col_spec, raw_data, hdgs):
+    def _create_vars(self, col_spec, raw_data, names):
         """
         Creates the set of dependent and independent variables measured by this
         sweep test.
         """
-        
+        # Unpack col_spec
+        all_spec, ind_spec, dep_spec, exp_spec = col_spec
         # Calculate number of specified columns (not including expand)
-        tot_cols = len(col_spec[0])
-        expand = not (col_spec[3]["idx"] is None)
+        tot_cols = len(all_spec)
+        expand = not (exp_spec["idx"] is None)
         fixed_cols = tot_cols - (1 if expand else 0)
-        
-        # Check that the number of columns in the file matches the number
-        # specified in "columns"
-        if len(hdgs) != fixed_cols:
+        # Check that the number of variable names matches the number of
+        # specified columns
+        if names is None:
+            hdgs = [None for i in range(fixed_cols)]
+        elif isinstance(names, list):
+            if len(names) != fixed_cols:
+                raise ValueError(
+                    f"Wrong number of names specified: expecting {fixed_cols}, "
+                    f"received {len(names)}"
+                )
+            else:
+                hdgs = names
+        else:
+            raise TypeError("names must be None or a list")
+        # Verify column spec has the same number of cols as the data and expand
+        # the expand specified (if present)
+        if fixed_cols != raw_data.shape[1]:
             if expand:
-                # Expand the col_spec, adding non-numbered independent or
-                # dependent variables, as appropriate, in place of the "expand"
-                # spec. First, calculate the number of variables that must be
-                # added:
-                expand_num = len(hdgs) - fixed_cols
-                
-                # Next, recompute the indices for all fixed specifiers that
-                # follow the expand. The indices will increase by `expand_num-1`
-                # as the expand specifier will be removed and replaced with
-                # `expand_num` fixed specifiers.
-                for i in range(col_spec[3]["idx"]+1, len(col_spec[0])):
-                    col_spec[0][i]["idx"] += expand_num-1
-                
+                # Calculate the number of variables that must be added:
+                expand_num = raw_data.shape[1] - fixed_cols
+                # Recompute the column numbers indices for all fixed specifiers
+                # following the expand specifier.
+                for i in range(exp_spec["idx"] + 1, len(all_spec)):
+                    all_spec[i]["idx"] += expand_num - 1
                 # Next, remove the expand specifier
-                del col_spec[0][ col_spec[3]["idx"] ]
-                
-                # Add the fixed specifiers
+                del all_spec[ exp_spec["idx"] ]
+                # Insert the appropriate number of fixed specifiers
                 for i in range(expand_num):
                     fixed_spec = {
-                        "type":col_spec[3]["type"],
-                        "idx": col_spec[3]["idx"] + i,
+                        "type": exp_spec["type"],
+                        "idx": exp_spec["idx"] + i,
                         "expand":False,
                         "numbered":False,
                         "number":None
                     }
-                    col_spec[0].insert(col_spec[3]["idx"]+i, fixed_spec)
+                    all_spec.insert(exp_spec["idx"] + i, fixed_spec)
+                    hdgs.insert(exp_spec["idx"] + i, None)
+                # Rebuild the lists of numbered and non-numbered fixed vars
+                ind_spec["num"] = {}
+                ind_spec["non"] = []
+                dep_spec["num"] = {}
+                dep_spec["non"] = []
                 
-                # Finally, rebuild the lists of numbered and non-numbered fixed
-                # variables
-                col_spec[1]["num"] = {}; col_spec[2]["num"] = {}
-                col_spec[1]["non"] = []; col_spec[2]["non"] = []
-                
-                for c in col_spec[0]:
+                for c in all_spec:
                     if c["type"] == "dep":
                         if c["numbered"]:
-                            col_spec[2]["num"][c["number"]] = c["idx"]
+                            dep_spec["num"][c["number"]] = c["idx"]
                         else:
-                            col_spec[2]["non"].append(c["idx"])
+                            dep_spec["non"].append(c["idx"])
                     else:
                         if c["numbered"]:
-                            col_spec[1]["num"][c["number"]] = c["idx"]
+                            ind_spec["num"][c["number"]] = c["idx"]
                         else:
-                            col_spec[1]["non"].append(c["idx"])
+                            ind_spec["non"].append(c["idx"])
             else:
                 raise ValueError("Col spec does not match # of cols in file")
         
-        logger.debug("Expanded col_spec = "+str(col_spec[0]))
-        logger.debug("Ind. var indices = "+str(col_spec[1]))
-        logger.debug("Dep. var indices = "+str(col_spec[2]))
+        logger.debug("Expanded col_spec = " + str(all_spec))
+        logger.debug("Ind. var indices = " + str(ind_spec))
+        logger.debug("Dep. var indices = " + str(dep_spec))
         
         # Build the dictionaries of variables
         self.N = 0
-        for i in sorted(col_spec[1]["num"].keys()):
-            # Create an independent variable and fill out properties
+        def create_IV(_name, col):
+            # Create an IndependentVariable and fill out the properties
             iv = IndependentVariable()
-            iv._name = "x{0:d}".format(self.N)
-            iv.col   = col_spec[1]["num"][i]
-            iv.name  = hdgs[iv.col]
+            iv._name = _name
+            iv.col   = col
+            iv.name  = (
+                f"_Col{iv.col}" if hdgs[iv.col] is None else str(hdgs[iv.col])
+            )
             iv.axis  = self.N
             
             # Store the independent variable in the dictionaries
-            self.names[iv.name]   = iv
+            if iv.name in self.names:
+                raise KeyError(f"Column name {iv.name} is not unique")
+            else:
+                self.names[iv.name] = iv
             self.axes[iv.axis]    = iv
             self._names[iv._name] = iv
             self.ind_vars.append(iv)
-            
             self.N += 1
-        for i in col_spec[1]["non"]:
-            iv = IndependentVariable()
-            iv._name = "x{0:d}".format(self.N)
-            iv.col   = i
-            iv.name  = hdgs[iv.col]
-            iv.axis  = self.N
-            
-            # Store the independent variable in the dictionaries
-            self.names[iv.name]   = iv
-            self.axes[iv.axis]    = iv
-            self._names[iv._name] = iv
-            self.ind_vars.append(iv)
-            
-            self.N += 1
+        for i in sorted(ind_spec["num"].keys()):
+            create_IV("x{0:d}".format(i), ind_spec["num"][i])
+        for col, i in ind_spec["non"]:
+            create_IV("x{0:d}".format(ind_spec["max_number"] + 1 + i), col)
         
         self.P = 0
-        _len_dep = len(col_spec[2]["num"]) + len(col_spec[2]["non"])
-        for i in sorted(col_spec[2]["num"].keys()):
+        _len_dep = len(dep_spec["num"]) + len(dep_spec["non"])
+        for i in sorted(dep_spec["num"].keys()):
             # Create a dependent variable and fill out properties
             dv = DependentVariable()
             dv._name = "y{0:d}".format(self.P)
@@ -2050,7 +2067,8 @@ class SweepTest:
             self.axes[self.N] = DependentVariable
         return
     
-    def _parse_numbered_spec(self, spec, spec_str):
+    @staticmethod
+    def _parse_numbered_spec(spec, spec_str):
         """
         Parses the order number in the string num_str and updates the `spec`
         accordingly.
@@ -2066,6 +2084,7 @@ class SweepTest:
         except ValueError:
             raise ValueError("Invalid column spec: "+spec_str)
     
+    @staticmethod
     def _parse_col_spec(self, columns):
         if columns is None:
             return None
@@ -2085,8 +2104,8 @@ class SweepTest:
         # Define dicts `dep` and `ind` to hold the indices of the numbered and
         # non-numbered dependent and independent variables, for easy access to
         # those specs.
-        dep = {"num":{}, "non":[]}
-        ind = {"num":{}, "non":[]}
+        dep = {"num":{}, "non":[], "max_number":-np.inf}
+        ind = {"num":{}, "non":[], "max_number":-np.inf}
         
         expand = {"idx":None, "type":None}  # location of the expand specifier
         
@@ -2101,24 +2120,26 @@ class SweepTest:
                 if len(s_i) == 1:
                     ind["non"].append(i)
                 else:
-                    num = self._parse_numbered_spec(spec, s_i)
+                    num = SweepTest._parse_numbered_spec(spec, s_i)
                     
                     if num in ind["num"]:
-                        raise ValueError("x"+str(num)+" is repeated")
+                        raise ValueError(f"x{num} is repeated")
                     
                     ind["num"][num] = i
+                    ind["max_number"] = max(ind["max_number"], num)
             elif s_i.startswith("y"):
                 spec["type"] = "dep"
                 
                 if len(s_i) == 1:
                     dep["non"].append(i)
                 else:
-                    num = self._parse_numbered_spec(spec, s_i)
+                    num = SweepTest._parse_numbered_spec(spec, s_i)
                     
                     if num in dep["num"]:
                         raise ValueError("y"+str(num)+" is repeated")
                     
                     dep["num"][num] = i
+                    dep["max_number"] = max(dep["max_number"], num)
             elif s_i.startswith(":"):
                 if expand["idx"] is not None:
                     raise ValueError("Multiple expand arguments specified")
