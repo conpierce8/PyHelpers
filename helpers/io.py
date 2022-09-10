@@ -1427,7 +1427,12 @@ class Trial:
         self.iv = iv
     
     def __getattr__(self, attr):
-        return self.iv.__getattribute__(attr)
+        if attr == "name":
+            return self.iv.name + " trial"
+        elif attr == "_name":
+            return self.iv._name + "_trial"
+        else:
+            return self.iv.__getattribute__(attr)
 
 
 class DependentVariable:
@@ -1530,7 +1535,7 @@ class SweepTest:
     """
     
     def __init__(
-        self: SweepTest,
+        self,
         raw_data: np.ndarray = None,
         columns: str = ":,y0",
         names: typing.Union[None, list[typing.Union[str, None], ...]] = None,
@@ -1573,7 +1578,7 @@ class SweepTest:
             self.load(raw_data, columns, names)
     
     def load(
-        self: SweepTest,
+        self,
         raw_data: np.ndarray,
         columns: str = ":,y0",
         names: typing.Union[None, list[typing.Union[str, None], ...]] = None,
@@ -1666,11 +1671,7 @@ class SweepTest:
         shape = {}
         for i in range(len(self.Y.shape)):
             shape[i] = self.Y.shape[i]
-            if self.axes[i].name is not None:
-                shape[self.axes[i].name] = self.Y.shape[i]
-                if self.axes[i].Tn is not None:
-                    
-            elif 
+            shape[self.axes[i].name] = self.Y.shape[i]
         for iv in self.ind_vars:
             shape[iv.axis] = iv.values.size
             shape[iv.name] = iv.values.size
@@ -2056,9 +2057,17 @@ class SweepTest:
         self.P = 0
         _len_dep = len(dep_spec["num"]) + len(dep_spec["non"])
         for i in sorted(dep_spec["num"].keys()):
-            create_DV("y{0:d}".format(i, dep_spec["num"][i])
+            create_var(
+                DependentVariable,
+                "y{0:d}".format(i),
+                dep_spec["num"][i],
+            )
         for i, col in dep_spec["non"]:
-            create_DV("y{0:d}".format(dep_spec["max_number"] + 1 + i), col)
+            create_var(
+                DependentVariable,
+                "y{0:d}".format(dep_spec["max_number"] + 1 + i),
+                col,
+            )
         if _len_dep > 1:
             # Allocate an axis for the dependent variable components
             self.axes[self.N] = DependentVariable
