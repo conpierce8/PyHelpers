@@ -45,34 +45,37 @@ simulation data, and plotting results.
 import pint
 
 ureg = pint.UnitRegistry()
-ureg.define('percent = 1/100 = pct')
+ureg.define("percent = 1/100 = pct")
 
 Qty = ureg.Quantity
 
 
 ### Functions ==================================================================
 
+
 def factors(x):
     """
     Calculates all factors of the positive integer `x`.
     """
-    
-    return [i for i in range(1, x+1) if x%i == 0]
+
+    return [i for i in range(1, x + 1) if x % i == 0]
 
 
 ### Classes ====================================================================
 
+
 class EmptyObject:
-    """ Defines a class with no members that can be used as a generic data
+    """Defines a class with no members that can be used as a generic data
     container. Use this class by creating an instance and assigning variables to
     it, e.g.:
-    
+
     ```
     varName = EmptyObject()
     varName.member1 = 1
     varName.member2 = "Hello, world!"
     varName.member3 = ["It's", "nice", "to", "meet", "you."]
     ```
-    
+
     """
+
     pass
