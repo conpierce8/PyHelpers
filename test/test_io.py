@@ -189,8 +189,8 @@ class TestSweepTest(unittest.TestCase):
                 self.assertEqual(len(st.names), 2+self.P)
             with self.subTest("Test (2.c.2)"):
                 # Dep. var. expanded
-            st = io.SweepTest(self.filename, "x,x,:y")
-            self.assertEqual(len(st.names), 2+self.P)
+                st = io.SweepTest(self.filename, "x,x,:y")
+                self.assertEqual(len(st.names), 2+self.P)
         
         #TODO: add other tests to ensure col spec was correctly parsed, e.g.:
         #
