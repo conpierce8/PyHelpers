@@ -1671,16 +1671,10 @@ class SweepTest:
         shape = {}
         for i in range(len(self.Y.shape)):
             shape[i] = self.Y.shape[i]
-            shape[self.axes[i].name] = self.Y.shape[i]
-        for iv in self.ind_vars:
-            shape[iv.axis] = iv.values.size
-            shape[iv.name] = iv.values.size
-            if iv.t_axis is not None:
-                shape[iv.t_axis] = iv.Tn
-                shape[iv.name + " Trial"] = iv.Tn
-        if self.P > 1:
-            shape[self.dep_vars[0].axis] = self.P
-            shape["Dependent"] = self.P
+            if self.axes[i] == DependentVariable:
+                shape[DependentVariable] = self.Y.shape[i]
+            else:
+                shape[self.axes[i].name] = self.Y.shape[i]
         return shape
     
     @property
@@ -1817,7 +1811,7 @@ class SweepTest:
                             _st.axes[output_axis] = trial_copy
                             _st.num_t_axes += 1
                             output_axis += 1
-                        data_slc = data_slc + (_idx, )
+                        data_slc = data_slc + [_idx]
                     elif isinstance(_idx, int):
                         pass
                     elif isinstance(_idx, list):
@@ -1894,10 +1888,14 @@ class SweepTest:
         
         ax_count = self.N + 1
         for iv in self.ind_vars:
-            iv.t_axis = ax_count
-            self.axes[ax_count] = Trial(iv)
-            ax_count += 1
-            self.num_t_axes += 1
+            if iv.Tn > 1:
+                trial = Trial(iv)
+                iv.t_axis = ax_count
+                self.axes[ax_count] = trial
+                # self.names[trial.name] = trial
+                # self._names[trial._name] = trial
+                ax_count += 1
+                self.num_t_axes += 1
     
     def _calc_sweep_limits(self, raw_data):
         """Calculate the number of values `M_n` and repetitions `T_n` per
@@ -2010,9 +2008,22 @@ class SweepTest:
         _names = {}
         ind_vars = []
         dep_vars = []
+        dep_idx = {}
         
-        self.N = 0
+        N = 0
+        P = 0
+        _len_dep = len(dep_spec["num"]) + len(dep_spec["non"])
         def create_var(var_type, _name, col):
+            logger.debug(
+                "create_var: var_type = " + " ".join([
+                    str(var_type),
+                    "_name =",
+                    _name,
+                    "col =",
+                    str(col)
+                ])
+            )
+            
             # Create a variable and fill out the properties
             var = var_type()
             var._name = _name
@@ -2021,61 +2032,69 @@ class SweepTest:
                 f"_Col{var.col}" if hdgs[var.col] is None else str(hdgs[var.col])
             )
             
-            # Store the independent variable in the dictionaries
             if var.name in names:
                 raise KeyError(f"Column name {var.name} is not unique")
-            else:
-                names[var.name] = var
-            axes[var.axis]    = var
-            _names[var._name] = var
             
+            # Store the variable in the dictionaries
             if isinstance(var, IndependentVariable):
-                var.axis  = self.N
-                self.N += 1
-                # self.ind_vars.append(var)
+                var.axis = N
+                ind_vars.append(var)
+                axes[var.axis] = var
             else:
-                var.axis = self.N if _len_dep > 1 else None
                 if _len_dep > 1:
-                    var.idx = self.P
-                self.P += 1
-                self.dep_idx[dv.idx] = dv
-                # self.dep_vars.append(var)
-            self.N += 1
+                    logger.debug("_len_dep > 1; N = " + str(N))
+                    var.axis = N
+                    var.idx = P
+                    dep_idx[var.idx] = var
+                else:
+                    var.axis = None
+                    var.idx = None
+                dep_vars.append(var)
+            names[var.name] = var
+            _names[var._name] = var
+        
         for i in sorted(ind_spec["num"].keys()):
             create_var(
                 IndependentVariable,
                 "x{0:d}".format(i),
                 ind_spec["num"][i],
             )
+            N += 1
         for i, col in enumerate(ind_spec["non"]):
             create_var(
                 IndependentVariable,
                 "x{0:d}".format(ind_spec["max_number"] + 1 + i),
                 col,
             )
-        
-        self.P = 0
-        _len_dep = len(dep_spec["num"]) + len(dep_spec["non"])
+            N += 1
         for i in sorted(dep_spec["num"].keys()):
             create_var(
                 DependentVariable,
                 "y{0:d}".format(i),
                 dep_spec["num"][i],
             )
-        for i, col in dep_spec["non"]:
+            P += 1
+        for i, col in enumerate(dep_spec["non"]):
             create_var(
                 DependentVariable,
                 "y{0:d}".format(dep_spec["max_number"] + 1 + i),
                 col,
             )
+            P += 1
+        logger.debug("axes are " + str(axes))
+        
+        # Parsing succeeded; store the temporary variables in self
+        self.N = N
         if _len_dep > 1:
             # Allocate an axis for the dependent variable components
-            self.axes[self.N] = DependentVariable
+            axes[self.N] = DependentVariable
+            self.P = P
         self.names = names
         self.axes = axes
         self._names = _names
         self.ind_vars = ind_vars
         self.dep_vars = dep_vars
+        self.dep_idx = dep_idx
         return
     
     @staticmethod
@@ -2096,7 +2115,7 @@ class SweepTest:
             raise ValueError("Invalid column spec: "+spec_str)
     
     @staticmethod
-    def _parse_col_spec(self, columns):
+    def _parse_col_spec(columns):
         if columns is None:
             return None
         
@@ -2168,7 +2187,10 @@ class SweepTest:
             
             logger.debug("spec = "+str(spec))
             specs.append(spec)
-        
+        if ind["max_number"] == -np.inf:
+            ind["max_number"] = -1
+        if dep["max_number"] == -np.inf:
+            dep["max_number"] = -1
         return specs, ind, dep, expand
     
 
