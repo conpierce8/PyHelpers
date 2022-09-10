@@ -42,108 +42,158 @@ class TestSweepTest(unittest.TestCase):
         self.T0 = 4
         self.T1 = 5
         self.P = 6
-        self.filename = "test_SweepTest.txt"
-        with open(self.filename, "w") as tmpfile:
-            tmpfile.write("\t".join([f"ind{i}" for i in range(2)]) + "\t")
-            tmpfile.write("R\tTheta\t")
-            tmpfile.write(
-                "\t".join([f"dep{i}" for i in range(self.P-2)]) + "\n"
-            )
-            count = 0
-            for t0 in range(self.T0):
-                for n0 in range(self.N0):
-                    for t1 in range(self.T1):
-                        for n1 in range(self.N1):
-                            tmpfile.write(
-                                "\t".join(
-                                    [f"{n0}", f"{n1}"]
-                                    + [f"{count+j}" for j in range(self.P)]
-                                ) + "\n"
-                            )
-                            count += self.P
+        
+        count = 0
+        rows = []
+        for t0 in range(self.T0):
+            for n0 in range(self.N0):
+                for t1 in range(self.T1):
+                    for n1 in range(self.N1):
+                        rows.append(
+                            [n0, n1]
+                            + [0.5*(count+j) for j in range(self.P)]
+                        )
+                        count += self.P
+        self.raw_data = np.array(rows)
+        self.st = SweepTest()
     
     def tearDown(self):
         os.remove(self.filename)
     
-    def test_parse_column_spec(self):
+    def test_load(self):
         """Test that column specifier strings are correctly parsed."""
         
-        # (1) Test that invalid column specs are rejected
-        #
-        # (1.a) all columns explicitly numbered
-        # (1.a.1) incorrect number of columns for data provided
-        self.assertRaises(ValueError, io.SweepTest, self.filename, "x0,y0")
-        # (1.a.2) correct number of columns; repeated ind. var. numbering
-        self.assertRaises(
-            ValueError,
-            io.SweepTest,
-            self.filename,
-            ",".join(["x0"]*2 + [f"y{i}" for i in range(self.P)]),
-        )
-        # (1.a.3) correct number of columns; repeated dep. var. numbering
-        self.assertRaises(
-            ValueError,
-            io.SweepTest,
-            self.filename,
-            ",".join(["x0", "x1"] + ["y0"]*self.P),
-        )
-        # (1.b) some columns not explicitly numbered
-        # (1.b.1) correct number of columns; repeated dep. var. numbers
-        self.assertRaises(
-            ValueError,
-            io.SweepTest,
-            self.filename,
-            ",".join(["x", "x1"] + ["y0"]*self.P),
-        )
-        # (1.b.2) correct number of columns; some repeated dep. var. numbers
-        self.assertRaises(
-            ValueError,
-            io.SweepTest,
-            self.filename,
-            ",".join(["x", "x1", "y", "y"] + ["y0"]*(self.P-2)),
-        )
-        # (1.c) expanding specifiers used
-        # (1.c.1) correct number of cols with expanding spec; repeated ind. var.
-        self.assertRaises(ValueError, io.SweepTest, self.filename, "x0,x0,:y")
-        # (1.c.2) correct number of cols with expanding spec; repeated dep. var.
-        self.assertRaises(
-            ValueError,
-            io.SweepTest,
-            self.filename,
-            "x0,x1,y0,y0,:y",
-        )
-        # (1.c.3) multiple expanding specs given
-        self.assertRaises(ValueError, io.SweepTest, self.filename, "x,:,y,:")
-        # (1.c.4) invalid syntax for expanding spec
-        self.assertRaises(ValueError, io.SweepTest, self.filename, "x,x,y:")
-        # (1.d) invalid variable specs
-        # (1.d.1) invalid variable type
-        self.assertRaises(ValueError, io.SweepTest, self.filename, "a,x,:y")
-        # (1.d.2) invalid variable number
-        self.assertRaises(ValueError, io.SweepTest, self.filename, "x,xA,:y")
+        ## (1) Test that invalid column specs are rejected
         
-        # (2) Test that correct specifications are parsed correctly
-        #
-        # (2.a) Fully explicit numbering
-        st = io.SweepTest(
-            self.filename,
-            ",".join(["x1,x0"]+[f"y{i}" for i in range(self.P)]),
-        )
-        self.assertEqual(len(st.names), 2+self.P)
-        # (2.b) Implicit numbering; fully specified
-        st = io.SweepTest(self.filename, ",".join(["x"]*2 + ["y"]*self.P))
-        self.assertEqual(len(st.names), 2+self.P)
-        # (2.c) Expanding specs
-        # (2.c.1) Ind. var. expanded
-        st = io.SweepTest(self.filename, ":x"+",y"*self.P)
-        self.assertEqual(len(st.names), 2+self.P)
-        # (2.c.2) Dep. var. expanded
-        st = io.SweepTest(self.filename, "x,x,:y")
-        self.assertEqual(len(st.names), 2+self.P)
+        # (1.a) all columns explicitly numbered
+        with self.subTest("Test (1.a.1)"):
+            # incorrect number of columns for data provided
+            self.assertRaises(
+                ValueError,
+                io.SweepTest().load,
+                self.raw_data,
+                "x0,y0",
+            )
+        with self.subTest("Test (1.a.2)"):
+            # correct number of columns; repeated ind. var. numbering
+            self.assertRaises(
+                ValueError,
+                io.SweepTest().load,
+                self.raw_data,
+                ",".join(["x0"]*2 + [f"y{i}" for i in range(self.P)]),
+            )
+        with self.subTest("Test (1.a.3)"):
+            # correct number of columns; repeated dep. var. numbering
+            self.assertRaises(
+                ValueError,
+                io.SweepTest().load,
+                self.raw_data,
+                ",".join(["x0", "x1"] + ["y0"]*self.P),
+            )
+        
+        # (1.b) some columns not explicitly numbered
+        with self.subTest("Test (1.b.1)"):
+            # correct number of columns; repeated dep. var. numbers
+            self.assertRaises(
+                ValueError,
+                io.SweepTest().load,
+                self.raw_data,
+                ",".join(["x", "x1"] + ["y0"]*self.P),
+            )
+        with self.subTest("Test (1.b.2)"):
+            # correct number of columns; some repeated dep. var. numbers
+            self.assertRaises(
+                ValueError,
+                io.SweepTest().load,
+                self.raw_data,
+                ",".join(["x", "x1", "y", "y"] + ["y0"]*(self.P-2)),
+            )
+        
+        # (1.c) expanding specifiers used
+        with self.subTest("Test (1.c.1)"):
+            # correct number of cols with expanding spec; repeated ind. var.
+            self.assertRaises(
+                ValueError,
+                io.SweepTest().load,
+                self.raw_data,
+                "x0,x0,:y"
+            )
+        with self.subTest("Test (1.c.2)"):
+            # correct number of cols with expanding spec; repeated dep. var.
+            self.assertRaises(
+                ValueError,
+                io.SweepTest().load,
+                self.raw_data,
+                "x0,x1,y0,y0,:y",
+            )
+        with self.subTest("Test (1.c.3)"):
+            # multiple expanding specs given
+            self.assertRaises(
+                ValueError,
+                io.SweepTest().load,
+                self.raw_data,
+                "x,:,y,:",
+            )
+        with self.subTest("Test (1.c.4)"):
+            # invalid syntax for expanding spec
+            self.assertRaises(
+                ValueError,
+                io.SweepTest().load,
+                self.raw_data,
+                "x,x,y:",
+            )
+        
+        # (1.d) invalid variable specs
+        with self.subTest("Test (1.d.1)"):
+            # invalid variable type
+            self.assertRaises(
+                ValueError,
+                io.SweepTest().load,
+                self.raw_data,
+                "a,x,:y",
+            )
+        with self.subTest("Test (1.d.2)"):
+            # invalid variable number
+            self.assertRaises(
+                ValueError,
+                io.SweepTest().load,
+                self.raw_data,
+                "x,xA,:y",
+            )
+        
+        ## (2) Test that correct specifications are parsed correctly
+        
+        with self.subTest("Test (2.a)"):
+            # Fully explicit numbering
+            st = io.SweepTest(
+                self.raw_data,
+                ",".join(["x1,x0"]+[f"y{i}" for i in range(self.P)]),
+            )
+            self.assertEqual(
+                st.shape,
+                (self.N1, self.N0, self.P, self.T1, self.T0))
+            self.assertEqual(len(st.names), 2+self.P)
+            for i, Tn in zip([1, 0], [self.T0, self.T1]):
+                self.assertEqual(st._names[f"x{i}"].axis, i)
+                self.assertEqual(st._names[f"x{i}"].t_axis, i + 3)
+                self.assertEQual(st._names[f"x{i}"].Tn, Tn)
+        with self.subTest("Test (2.b)"):
+            # Implicit numbering; fully specified
+            st = io.SweepTest(self.filename, ",".join(["x"]*2 + ["y"]*self.P))
+            self.assertEqual(len(st.names), 2+self.P)
+        with self.subTest("Test (2.c)"):
+            # Expanding specs
+            with self.subTest("Test (2.c.1)"):
+                # Ind. var. expanded
+                st = io.SweepTest(self.filename, ":x"+",y"*self.P)
+                self.assertEqual(len(st.names), 2+self.P)
+            with self.subTest("Test (2.c.2)"):
+                # Dep. var. expanded
+            st = io.SweepTest(self.filename, "x,x,:y")
+            self.assertEqual(len(st.names), 2+self.P)
         
         #TODO: add other tests to ensure col spec was correctly parsed, e.g.:
         #
-        #   * check independent variable ordering
     
     def test_dim(self):
         st = io.SweepTest(self.filename, ",".join(["x"]*2 + ["y"]*self.P))

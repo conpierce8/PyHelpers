@@ -2004,67 +2004,69 @@ class SweepTest:
         logger.debug("Dep. var indices = " + str(dep_spec))
         
         # Build the dictionaries of variables
+        axes = {}
+        names = {}
+        _names = {}
+        ind_vars = []
+        dep_vars = []
+        
         self.N = 0
-        def create_IV(_name, col):
-            # Create an IndependentVariable and fill out the properties
-            iv = IndependentVariable()
-            iv._name = _name
-            iv.col   = col
-            iv.name  = (
-                f"_Col{iv.col}" if hdgs[iv.col] is None else str(hdgs[iv.col])
+        def create_var(var_type, _name, col):
+            # Create a variable and fill out the properties
+            var = var_type()
+            var._name = _name
+            var.col   = col
+            var.name  = (
+                f"_Col{var.col}" if hdgs[var.col] is None else str(hdgs[var.col])
             )
-            iv.axis  = self.N
             
             # Store the independent variable in the dictionaries
-            if iv.name in self.names:
-                raise KeyError(f"Column name {iv.name} is not unique")
+            if var.name in names:
+                raise KeyError(f"Column name {var.name} is not unique")
             else:
-                self.names[iv.name] = iv
-            self.axes[iv.axis]    = iv
-            self._names[iv._name] = iv
-            self.ind_vars.append(iv)
+                names[var.name] = var
+            axes[var.axis]    = var
+            _names[var._name] = var
+            
+            if isinstance(var, IndependentVariable):
+                var.axis  = self.N
+                self.N += 1
+                # self.ind_vars.append(var)
+            else:
+                var.axis = self.N if _len_dep > 1 else None
+                if _len_dep > 1:
+                    var.idx = self.P
+                self.P += 1
+                self.dep_idx[dv.idx] = dv
+                # self.dep_vars.append(var)
             self.N += 1
         for i in sorted(ind_spec["num"].keys()):
-            create_IV("x{0:d}".format(i), ind_spec["num"][i])
-        for col, i in ind_spec["non"]:
-            create_IV("x{0:d}".format(ind_spec["max_number"] + 1 + i), col)
+            create_var(
+                IndependentVariable,
+                "x{0:d}".format(i),
+                ind_spec["num"][i],
+            )
+        for i, col in enumerate(ind_spec["non"]):
+            create_var(
+                IndependentVariable,
+                "x{0:d}".format(ind_spec["max_number"] + 1 + i),
+                col,
+            )
         
         self.P = 0
         _len_dep = len(dep_spec["num"]) + len(dep_spec["non"])
         for i in sorted(dep_spec["num"].keys()):
-            # Create a dependent variable and fill out properties
-            dv = DependentVariable()
-            dv._name = "y{0:d}".format(self.P)
-            dv.col   = col_spec[2]["num"][i]
-            dv.name  = hdgs[dv.col]
-            dv.axis  = self.N if _len_dep > 1 else None
-            dv.idx   = self.P
-            
-            # Store the dependent variable in the dictionaries
-            self.names[dv.name]   = dv
-            self.dep_idx[dv.idx]  = dv
-            self._names[dv._name] = dv
-            self.dep_vars.append(dv)
-            
-            self.P += 1
-        for i in col_spec[2]["non"]:
-            dv = DependentVariable()
-            dv._name = "y{0:d}".format(self.P)
-            dv.col   = i
-            dv.name  = hdgs[dv.col]
-            dv.axis  = self.N if _len_dep > 1 else None
-            dv.idx   = self.P
-            
-            # Store the dependent variable in the dictionaries
-            self.names[dv.name]   = dv
-            self.dep_idx[dv.idx]  = dv
-            self._names[dv._name] = dv
-            self.dep_vars.append(dv)
-            
-            self.P += 1
+            create_DV("y{0:d}".format(i, dep_spec["num"][i])
+        for i, col in dep_spec["non"]:
+            create_DV("y{0:d}".format(dep_spec["max_number"] + 1 + i), col)
         if _len_dep > 1:
             # Allocate an axis for the dependent variable components
             self.axes[self.N] = DependentVariable
+        self.names = names
+        self.axes = axes
+        self._names = _names
+        self.ind_vars = ind_vars
+        self.dep_vars = dep_vars
         return
     
     @staticmethod
