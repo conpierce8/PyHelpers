@@ -1874,6 +1874,8 @@ class SweepTest:
                     raise IndexError("No variable named " + str(key))
 
             return self[tuple(_idx)]
+        elif idx is Ellipsis:
+            return self[tuple([slice(None) for i in self.Y.shape])]
         else:
             raise IndexError("Indexing not supported for type '" + str(type(idx)) + "'")
     
@@ -1909,6 +1911,9 @@ class SweepTest:
         idx_copy = []
         adv_idx_count = 0
         int_axes = []
+        axes_map = {}
+        new_axis = 0
+        new_shape = []
         for i, item in enumerate(idx):
             if i in adv_idxs:
                 if isinstance(item, list):
@@ -1916,30 +1921,38 @@ class SweepTest:
                         if not isinstance(j, int):
                             raise IndexError("Can only index a list of ints; found "+str(type(j)))
                     idx_copy.append(SweepTest.reshape_adv_idx(item, len(adv_idxs), adv_idx_count))
+                    new_shape.append(len(item))
                 elif isinstance(item, np.ndarray):
                     if len(item.shape) != 1:
                         raise IndexError("Can only index 1D arrays")
+                    
                     L = item.size
                     var = self.axes[i]
                     if var == DependentVariable:
                         raise IndexError("Cannot index dependent variable by value")
                     elif isinstance(var, Trial):
                         raise IndexError("Cannot index '" + var.name + "' by value")
+                    
                     M = var.values.size
-                    matches = np.sum(np.arange(1,M+1).reshape(M,1) * np.isclose(var.values.reshape(M,1), item), axis=0)
-                    if 0 in matches:
-                        invalid = matches == 0
-                        raise IndexError("Invalid values for " + var.name + ": " + str(matches[invalid]))
-                    else:
-                        matches = list(matches - 1)
-                        idx_copy.append(SweepTest.reshape_adv_idx(matches, len(adv_idxs), adv_idx_count))
+                    matches = np.sum(np.arange(1,M+1).reshape(M,1) * np.isclose(var.values.reshape(M,1), item), axis=0, dtype=np.int32)
+                    valid = matches > 0
+                    matches = list(matches[valid] - 1)
+                    idx_copy.append(SweepTest.reshape_adv_idx(matches, len(adv_idxs), adv_idx_count))
+                    new_shape.append(len(matches))
                 adv_idx_count += 1
+                axes_map[i] = new_axis
+                new_axis += 1
             else:
                 if isinstance(item, int):
                     idx_copy.append(slice(item, item+1, 1))
                     int_axes.append(i)
+                    axes_map[i] = None
                 else:
                     idx_copy.append(item)
+                    axes_map[i] = new_axis
+                    new_axis += 1
+                    old_shape = self.Y.shape[i]
+                    new_shape.append(len([i for i in range(*item.indices(old_shape))]))
         idx_copy = tuple(idx_copy)
         logger.debug("_do_adv_idx: idx_copy == " + str(idx_copy))
         logger.debug("_do_adv_idx: int_axes == " + str(int_axes))
@@ -1948,6 +1961,7 @@ class SweepTest:
         # indices, and remove all axes indexed with int
         data_copy = self.Y[idx_copy]
         logger.debug("_do_adv_idx: data_copy.shape == " + str(data_copy.shape))
+        logger.debug("_do_adv_idx: data_copy.OWNDATA == " + str(data_copy.flags["OWNDATA"]))
         if not adv_idx_contig:
             ax_order = [None for l in data_copy.shape]
             count_basic_idx = 0
@@ -1958,26 +1972,36 @@ class SweepTest:
                     ax_order[i] = len(adv_idxs) + count_basic_idx
                     count_basic_idx += 1
             data_copy = data_copy.transpose(*ax_order)
-        axes_map = {}
-        new_axis = 0
         if len(int_axes) > 0:
-            new_shape = []
-            for i, shp in enumerate(self.Y.shape):
-                if i not in int_axes:
-                    if isinstance(idx_copy[i], slice):
-                        new_shape.append(len([i for i in range(*idx_copy[i].indices(shp))]))
-                    else:
-                        new_shape.append(len(idx_copy[i]))
-                    axes_map[i] = new_axis
-                    new_axis += 1
-                else:
-                    axes_map[i] = None
             data_copy = data_copy.reshape(*new_shape)
+        logger.debug("_do_adv_idx: after reshape, data_copy.OWNDATA == " + str(data_copy.flags["OWNDATA"]))
         logger.debug("_do_adv_idx: axes_map == " + str(axes_map))
         
         _st = SweepTest()
         _st.Y = data_copy
         self._do_copy_vars(_st, idx_copy, axes_map)
+        return _st
+    
+    def _do_basic_idx(self, idx: tuple[typing.Union[int, slice], ...]):
+        """Perform basic indexing on `self`."""
+        
+        logger.debug("_do_adv_idx: idx == " + str(idx))
+        
+        # Convert all advanced indexes to broadcastable shapes. Raise error if
+        # a non-flat index is encountered.
+        axes_map = {}
+        new_axis = 0
+        for i, item in enumerate(idx):
+            if isinstance(item, int):
+                axes_map[i] = None
+            else:
+                axes_map[i] = new_axis
+                new_axis += 1
+        logger.debug("_do_adv_idx: axes_map == " + str(axes_map))
+        
+        _st = SweepTest()
+        _st.Y = self.Y[idx].copy()
+        self._do_copy_vars(_st, idx, axes_map)
         return _st
     
     def _do_copy_vars(self, _st, idx, axes_map):
@@ -1987,6 +2011,7 @@ class SweepTest:
         #   - independent variables that were previously scalar indexed or are
         #     scalar indexed in the current indexing operation are stored in all
         #     metadata collections (names, _names, ind_vars) except `axes`
+        N = 0
         for iv in self.ind_vars:
             iv_copy = iv.copy()
             iv_copy.axis = axes_map[iv.axis]
@@ -2002,6 +2027,7 @@ class SweepTest:
             _st.ind_vars.append(iv_copy)
             if iv_copy.axis is not None:
                 _st.axes[iv_copy.axis] = iv_copy
+                N += 1
             
             # Update trial metadata if present
             if iv.trial is not None:
@@ -2019,6 +2045,7 @@ class SweepTest:
                     _st.axes[axes_map[iv.t_axis]] = trial_copy
                 _st.names[trial_copy.name] = trial_copy
                 _st._names[trial_copy._name] = trial_copy
+        _st.N = N
         
         # Copy DependentVariables
         if self.dep_vars[0].axis is None:  # Previously indexed by a scalar
@@ -2026,6 +2053,7 @@ class SweepTest:
             dv_copy.idx = None
             dv_copy.axis = axes_map[self.dep_vars[0].axis]
             _st.dep_vars.append(dv_copy)
+            _st.P = 0
         elif axes_map[self.dep_vars[0].axis] is None:  # Currently indexed by a scalar
             _dep_idx = idx[self.dep_vars[0].axis]
             if isinstance(_dep_idx, slice):
@@ -2036,10 +2064,16 @@ class SweepTest:
             _st.dep_vars.append(dv_copy)
             _st.names[dv_copy.name] = dv_copy
             _st._names[dv_copy._name] = dv_copy
+            _st.P = 0
         else:
             old_axis = self.dep_vars[0].axis
             new_axis = axes_map[old_axis]
-            _dep_idx = np.array(idx[old_axis]).flatten()
+            if isinstance(idx[old_axis], slice):
+                _dep_idx = [i for i in range(*idx[old_axis].indices(self.P))]
+                _st.P = len(_dep_idx)
+            else:
+                _dep_idx = np.array(idx[old_axis]).flatten()
+                _st.P = _dep_idx.size
             for i, _dep_idx_i in enumerate(_dep_idx):
                 dv_copy = self.dep_idx[_dep_idx_i].copy()
                 dv_copy.axis = new_axis
@@ -2047,6 +2081,7 @@ class SweepTest:
                 _st.dep_vars.append(dv_copy)
                 _st.names[dv_copy.name] = dv_copy
                 _st._names[dv_copy._name] = dv_copy
+                _st.dep_idx[i] = dv_copy
             _st.axes[new_axis] = DependentVariable
         return
     

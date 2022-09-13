@@ -79,6 +79,7 @@ class TestSweepTest(unittest.TestCase):
                         )
                         count += self.P
         self.raw_data = np.array(rows)
+        self.st = io.SweepTest(self.raw_data, ",".join(["x"]*2 + ["y"]*self.P))
     
     def test_load(self):
         """Test loading data into a SweepTest."""
@@ -314,7 +315,7 @@ class TestSweepTest(unittest.TestCase):
     def test_indexing(self):
         """Test indexing a SweepTest."""
         
-        st = io.SweepTest(self.raw_data, ",".join(["x"]*2 + ["y"]*self.P))
+        st = self.st
         
         with self.subTest("Dependent variable scalar indexing"):
             var_name = "_Col4"
@@ -338,112 +339,9 @@ class TestSweepTest(unittest.TestCase):
             self.assertIsNone(st2.dep_vars[0].axis)
             self.assertIsNone(st2.dep_vars[0].idx)
         
-        with self.subTest("Basic slicing (tuple)"):
-            raise unittest.SkipTest("basic slicing (tuple)")
-            st2 = st[:, 1, 3, 2:3, 2:6:2]
-            self.assertIn("_Col0", st2.names)
-            self.assertNotIn("_Col1", st2.names)
-            for iv in st2.ind_vars:
-                if iv.name == "_Col1":
-                    self.assertIsNone(iv.axis)
-            self.assertNotIn(io.DependentVariable, st2.names)
-            for dv in st2.dep_vars:
-                self.assertIsNone(dv.axis)
-                self.assertIsNone(dv.idx)
-            self.assertIn("_Col0 trial", st2.names)
-            self.assertIn("_Col1 trial", st2.names)
-            self.assertEqual(
-                st2.shape,
-                {
-                    0: self.N0,
-                    1: 1,
-                    2: 2,
-                    "_Col0": self.N0,
-                    "_Col0 trial": 1,
-                    "_Col1 trial": 2,
-                }
-            )
-        
-        with self.subTest("Basic slicing (dict)"):
-            raise unittest.SkipTest("basic slicing (dict)")
-            st2 = st[{
-                "_Col0": slice(None),
-                "_Col1": 1,
-                io.DependentVariable: 3,
-                "_Col0 trial": slice(2,3),
-                "_Col1 trial": slice(2,6,2),
-            }]
-            self.assertIn("_Col0", st2.names)
-            self.assertNotIn("_Col1", st2.names)
-            for iv in st2.ind_vars:
-                if iv.name == "_Col1":
-                    self.assertIsNone(iv.axis)
-            self.assertNotIn(io.DependentVariable, st2.names)
-            for dv in st2.dep_vars:
-                self.assertIsNone(dv.axis)
-                self.assertIsNone(dv.idx)
-            self.assertIn("_Col0 trial", st2.names)
-            self.assertIn("_Col1 trial", st2.names)
-            self.assertEqual(
-                st2.shape,
-                {
-                    0: self.N0,
-                    1: 1,
-                    2: 2,
-                    "_Col0": self.N0,
-                    "_Col0 trial": 1,
-                    "_Col1 trial": 2
-                }
-            )
-        
-        with self.subTest("Advanced slicing; ints only (tuple)"):
-            st2 = st[:, 1, 3, 2:3, [2,4]]
-            # Test correctness of st2.names
-            for s in st2.names:
-                self.assertIn(s, ("_Col0", "_Col1", "_Col5", "_Col0 trial", "_Col1 trial"))
-            self.assertEqual(st2.names["_Col0"].axis, 0)
-            self.assertIsNone(st2.names["_Col1"].axis)
-            self.assertIsNone(st2.names["_Col5"].axis)
-            self.assertEqual(st2.names["_Col0 trial"].axis, 1)
-            self.assertEqual(st2.names["_Col1 trial"].axis, 2)
-            # Test correctness of st2._names
-            for s in st2._names:
-                self.assertIn(s, ("x0", "x1", "y3", "x0_trial", "x1_trial"))
-            self.assertEqual(st2._names["x0"].axis, 0)
-            self.assertIsNone(st2._names["x1"].axis)
-            self.assertIsNone(st2._names["y3"].axis)
-            self.assertEqual(st2._names["x0_trial"].axis, 1)
-            self.assertEqual(st2._names["x1_trial"].axis, 2)
-            # Test correctness of axis assignments
-            self.assertEqual(len(st2.axes), 3)
-            self.assertEqual(st2.axes[0].name, "_Col0")
-            self.assertEqual(st2.axes[1].name, "_Col0 trial")
-            self.assertEqual(st2.axes[2].name, "_Col1 trial")
-            self.assertTrue(np.allclose(st2.axes[0].values, np.array([0.0, 1.0])))
-            self.assertTrue(np.allclose(st2.axes[1].trials, np.array([2])))
-            self.assertTrue(np.allclose(st2.axes[2].trials, np.array([2, 4])))
-            # Test correctness of dependent variables
-            self.assertEqual(len(st2.dep_vars), 1)
-            for dv in st2.dep_vars:
-                self.assertIsNone(dv.axis)
-                self.assertIsNone(dv.idx)
-                self.assertEqual(dv.name, "_Col5")
-                self.assertEqual(dv._name, "y3")
-            # Test correctness of shape
-            self.assertEqual(
-                st2.shape,
-                {
-                    0: self.N0,
-                    1: 1,
-                    2: 2,
-                    "_Col0": self.N0,
-                    "_Col0 trial": 1,
-                    "_Col1 trial": 2
-                }
-            )
-        
-        with self.subTest("Advanced slicing; floats (tuple)"):
-            st2 = st[np.array([0.0, 1.0]), 1, 3, 2:3, [2,4]]
+        def _test_vector_indexing(st2):
+            self.assertEqual(st2.N, 1)
+            self.assertEqual(st2.P, 0)
             # Test correctness of st2.names
             for s in st2.names:
                 self.assertIn(s, ("_Col0", "_Col1", "_Col5", "_Col0 trial", "_Col1 trial"))
@@ -489,6 +387,47 @@ class TestSweepTest(unittest.TestCase):
                     "_Col1 trial": 2
                 }
             )
+            st2.Y[0] = -7.0
+            self.assertTrue(np.all(st.Y >= -1))
+        
+        with self.subTest("Basic slicing (tuple)"):
+            st2 = st[:, 1, 3, 2:3, 2:6:2]
+            _test_vector_indexing(st2)
+            
+            st2 = st[1,0,4,3,2]
+            self.assertEqual(st2.Y.shape, tuple())
+            self.assertEqual(st2.Y, 0.5*670)
+        
+        with self.subTest("Basic slicing (dict)"):
+            st2 = st[{
+                "_Col0": slice(None),
+                "_Col1": 1,
+                io.DependentVariable: 3,
+                "_Col0 trial": slice(2,3),
+                "_Col1 trial": slice(2,6,2),
+            }]
+            _test_vector_indexing(st2)
+        
+        with self.subTest("Advanced slicing; ints only (tuple)"):
+            st2 = st[:, 1, 3, 2:3, [2,4]]
+            _test_vector_indexing(st2)
+        
+        with self.subTest("Advanced slicing; floats (tuple)"):
+            st2 = st[np.array([0.0, 1.0]), 1, 3, 2:3, [2,4]]
+            _test_vector_indexing(st2)
+    
+    def test_subsequent_indexing(self):
+        self.st = self.st[...]
+        self.test_indexing()
+        
+        self.st = self.st[np.array([0,1]),0:,0:6,0:9:1,:]
+        self.test_indexing()
+        # with self.subTest("Subsequent indexing"):
+            # st2 = st[:, 1, 3, 2:3, 2:6:2]
+            # self.assertRaises(st2[{io.DependentVariable: 4}], IndexError)
+            # self.assertRaises(st2[{"_Col1": 4}], IndexError)
+            # self.assertRaises(st2[st.names["_Col3"]], IndexError)
+            # self.assertRaises
     
     def test_reshape_adv_idx(self):
         """Test reshaping list of indices into a broadcastable shape."""
