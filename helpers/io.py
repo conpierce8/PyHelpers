@@ -580,9 +580,9 @@ class Database:
                 if fileTypes[f] == "quasi-static":
                     self._data[f] = load_data(os.path.join(self._tldir, f), src="osc")
                 elif fileTypes[f] == "frequency sweep":
-                    self._data[f] = SweepTest(
-                        os.path.join(self._tldir, f), columns=None
-                    )
+                    raw_data, hdg = load_data(os.path.join(self._tldir, f), src="exp")
+                    cols = Database._get_fs_col_spec(hdg)
+                    self._data[f] = SweepTest(raw_data, cols, hdg))
 
         # Find the requested data in the database and return it
         if testSpec["type"] == "quasi-static":
@@ -624,7 +624,19 @@ class Database:
                 force = None
 
             return {"disp": disp, "force": force}
-
+    
+    @staticmethod
+    def _get_fs_col_spec(hdg):
+        cols = []
+        for h in hdg:
+            if h in ("Frequency", "Amplitude", "X", "Y"):
+                cols.append("x")
+            elif h in ("R", "Theta", "StdDev"):
+                cols.append("y")
+            else:
+                raise ValueError("Unknown heading: " + h)
+        return ",".join(cols)
+        
     def get_file_data(self, path, type):
         """
         Gets the data stored in the file given by `path`.
@@ -672,7 +684,9 @@ class Database:
         if type == "q-s":
             self._data[abspath] = load_data(abspath, src="osc")
         else:
-            self._data[abspath] = SweepTest(abspath, columns=None)
+            raw_data, hdg = load_data(abspath, src="exp")
+            cols = Database._get_fs_col_spec(hdg)
+            self._data[abspath] = SweepTest(raw_data, cols, hdg)
 
         return self._data[abspath]
 
