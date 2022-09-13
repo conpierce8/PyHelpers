@@ -1487,7 +1487,13 @@ class IndependentVariable:
         elif attr == "trials":
             if self.trial is None:
                 return None
-            return self.trial.trials
+            else:
+                return self.trial.trials
+        elif attr == "Tn":
+            if self.trial is None:
+                return 1
+            else:
+                return self.trial.trials.size
         else:
             raise AttributeError(f"Attribute {attr} not found")
 
@@ -1627,6 +1633,7 @@ class SweepTest:
         raw_data: np.ndarray = None,
         columns: str = ":,y0",
         names: typing.Union[None, list[typing.Union[str, None], ...]] = None,
+        units: typing.Union[None, list[typing.Union[str, None, pint.Unit], ...]] = None,
     ):
         """Create a SweepTest instance.
 
@@ -1642,6 +1649,9 @@ class SweepTest:
             Column specifier string. See `load` for details.
         `names`: `list[str or None, ...]` or `None` (optional, default: `None`)
             List of names assigned to each of the columns in `raw_data`. See
+            `load` for details.
+        `units`
+            List of units assigned to each of the columns in `raw_data`. See
             `load` for details.
         """
 
@@ -1663,13 +1673,14 @@ class SweepTest:
         self.P = 0
 
         if raw_data is not None:
-            self.load(raw_data, columns, names)
+            self.load(raw_data, columns, names, units)
 
     def load(
         self,
         raw_data: np.ndarray,
         columns: str = ":,y0",
         names: typing.Union[None, list[typing.Union[str, None], ...]] = None,
+        units: typing.Union[None, list[typing.Union[str, None, pint.Unit], ...]] = None,
     ) -> None:
         """Load data from 2D array and parse variable names.
 
@@ -1681,9 +1692,9 @@ class SweepTest:
 
         Parameters
         ----------
-        `raw_data` : `numpy.ndarray`
+        `raw_data` :
             2D array of sweep data, with independent variables
-        `columns` : `str` (Optional)
+        `columns` : (Optional, default: `":,y0"`)
             Comma-separated string designating each column of data as ither an
             independent ("x") or dependent ("y") variable. The order of the
             variables in the output can optionally be specified by suffixing
@@ -1716,14 +1727,22 @@ class SweepTest:
                 axis 6: trials t_1 from column 3
                 axis 7: trials t_2 from column 0
                 axis 8: trials t_3 from column 2
-        `names` : `list[Union[str, NoneType]]` or `None`
+        `names` : (Optional, default: `None`)
             List of names associated with each independent and dependent
-            variable. If specified, must have `len()` equal to the number of
-            columns in `raw_data`. If `names[i] is None`, the corresponding
-            independent or dependent variable will be automatically assigned the
-            name `f"_Col{i}"`. If `names is None`, all variables will receive
-            automatic names.
-
+            variable. If `names` has more entries than columns of data in
+            `raw_data`, the extra entries are ignored. If `names` has fewer
+            entries than columns of data in `raw_data`, it is end-padded with
+            `None` to match the number of columns in `raw_data`. If `names[i]`
+            is `None`, the corresponding independent or dependent variable will
+            be automatically assigned the name `f"_Col{i}"`. If `names is None`,
+            all variables will receive automatic names.
+        `units` : (Optional, default: `None`)
+            List of units associated with each independent and dependent
+            variable. Specifying too many or too few entries in `units` is
+            treated the same as `names`. Any entries of `None` are treated as
+            dimensionless. If `None` is passed instead of a list, the data array
+            will not be unit-sensitive, i.e. a pure numpy array with no units.
+        
         Raises
         ------
         `KeyError`
@@ -1734,13 +1753,12 @@ class SweepTest:
               of fixed (non-expand) specifiers in `columns`
         """
 
-        # # Old behavior: load the data from file
-        # raw_data, hdgs = load_data(filename, src="exp")
-        # if col_spec is None:
-        # y = ("R", "Theta", "StdDev")
-        # cols = ",".join([("y" if h in y else "x") for h in hdgs])
-        # col_spec = self._parse_col_spec(cols)
-        # logger.debug("col_spec = " + str(col_spec[0]))
+        if units is not None:
+            raise NotImplementedError("Not implemented yet.")
+            # Unit-sensitive data will require refactoring self.Y into several
+            # arrays, one for each dependent variable, since pint associates one
+            # unit with the entire array, but dependent variables may have
+            # different units
 
         # Create variables
         self._create_vars(self._parse_col_spec(columns), raw_data, names)
@@ -2646,111 +2664,106 @@ class FreqSweepTest:
                 "Cannot compute strain; initial length" + " not specified"
             )
 
-    def _slice_RT(self, sweepTest):
-        n = len(sweepTest.axes)
-        idxR = []
-        idxT = []
-        for i in range(n):
-            if isinstance(sweepTest.axes[i], IndependentVariable):
-                idxR.append(slice(None))
-                idxT.append(slice(None))
-            elif sweepTest.axes[i] == "Dependent":
-                idxR.append(sweepTest.names["R"].idx)
-                idxT.append(sweepTest.names["Theta"].idx)
-            elif sweepTest.axes[i].endswith("Trial"):
-                idxR.append(slice(None))
-                idxT.append(slice(None))
-        return tuple(idxR), tuple(idxT)
-
     def load_data(self):
         """
         Loads the data specified for this test.
         """
 
         data = self.db.get_test_data(self.specimen.name, self.test.name)
-        disp = data["disp"]
-        forc = data["force"]
+        disp = data["disp"]  # type `SweepTest`
+        forc = data["force"]  # type `SweepTest`
 
         if disp is None:
             self._noDisp = True
         else:
-            idxR, idxT = self._slice_RT(disp)
+            R = disp["R"]
+            theta = disp["Theta"]
 
-            self.disp.raw = self.disp.sensor.toPhysical(
-                disp.Y[idxR] * np.exp(1j * np.pi * disp.Y[idxT] / 180) * ureg.volt,
+            R.Y = self.disp.sensor.toPhysical(
+                R.Y * np.exp(1j * np.pi * theta.Y[idxT] / 180) * ureg.volt,
                 gain=self.disp.gain,
             )
-            self.disp.params = disp.names
+            self.disp.raw = R
             self._noDisp = False
 
         if forc is None:
             self._noForce = True
         else:
-            idxR, idxT = self._slice_RT(forc)
+            R = forc["R"]
+            theta = forc["Theta"]
 
-            self.force.raw = self.force.sensor.toPhysical(
-                forc.Y[idxR] * np.exp(1j * np.pi * forc.Y[idxT] / 180) * ureg.volt,
+            R.Y = self.force.sensor.toPhysical(
+                R.Y * np.exp(1j * np.pi * theta.Y / 180) * ureg.volt,
                 gain=self.force.gain,
             )
-            self.force.params = forc.names
+            self.force.raw = R
             self._noForce = False
 
         if not (self._noDisp or self._noForce):
             # Check for consistency between independent variables of
             # displacement and force
-            if self.disp.N != self.force.N:
-                # Mismatched number of independent parameters
-                raise DataInconsistentError(
-                    "Force and displacement have different number of "
-                    + "parameters for test "
-                    + self.test.name
-                )
-            for name in self.disp.names:
-                if name not in self.force.names:
-                    raise DataInconsistentError(
-                        self.test.name
-                        + " has different force and "
-                        + "displacement parameters"
-                    )
-                if not np.allclose(
-                    self.disp.names[name].values, self.force.names[name].values, atol=0
-                ):
-                    raise DataInconsistentError(
-                        "Found different parameter values for "
-                        + name
-                        + "in test "
-                        + self.test.name
-                    )
-                if self.disp.names[name].Tn != self.force.names[name].Tn:
-                    raise DataInconsistentError(
-                        "Found different number of repetitions for "
-                        + name
-                        + "in test "
-                        + self.test.name
-                    )
-                if self.disp.names[name].axis != self.force.names[name].axis:
-                    raise DataInconsistentError(
-                        "Found different axis for "
-                        + name
-                        + " in test "
-                        + self.test.name
-                    )
+            self._check_data_consistency()
 
         # Compute stress and strain
         if not self.specimen.noSS:
             if not self._noDisp:
                 self.strain = EmptyObject()
-                self.strain.raw = self.disp.raw / self.specimen.length
+                self.strain.raw = self.disp.raw[...]
+                self.strain.raw.Y /= self.specimen.length
 
             if not self._noForce:
                 self.stress = EmptyObject()
-                self.stress.raw = self.force.raw / self.specimen.area
+                self.stress.raw = self.force.raw[...]
+                self.stress.raw.Y /= self.specimen.area
 
         self.dataLoaded = True
+    
+    def _check_data_consistency(self):
+        if self.disp.N != self.force.N:
+            # Mismatched number of independent parameters
+            raise DataInconsistentError(
+                "Force and displacement have different number of "
+                + "parameters for test "
+                + self.test.name
+            )
+        for iv in self.disp.ind_vars:
+            if iv.name not in self.force.names:
+                raise DataInconsistentError(
+                    self.test.name
+                    + " has different force and "
+                    + "displacement parameters"
+                )
+            if not np.allclose(iv.values, self.force.names[iv.name].values, atol=0):
+                raise DataInconsistentError(
+                    "Found different parameter values for "
+                    + iv.name
+                    + "in test "
+                    + self.test.name
+                )
+            if iv.Tn != self.force.names[iv.name].Tn:
+                raise DataInconsistentError(
+                    "Found different number of repetitions for "
+                    + iv.name
+                    + "in test "
+                    + self.test.name
+                )
+            if iv.axis != self.force.names[iv.name].axis:
+                raise DataInconsistentError(
+                    "Found different axis for "
+                    + iv.name
+                    + " in test "
+                    + self.test.name
+                )
+            if iv.t_axis != self.force.names[iv.name].t_axis:
+                raise DataInconsistentError(
+                    "Found different trial axis for "
+                    + iv.name
+                    + " in test "
+                    + self.test.name
+                )
 
     def get_disp(self, avg=False):
-        """
-        Gets the displacement data for this test.
+        """Get the displacement data for this test.
 
         Parameters
         ----------
@@ -2760,9 +2773,8 @@ class FreqSweepTest:
 
         Returns
         -------
-        the raw displacement data for this test (if displacement data was
-        collected in this test), or `None` if this test did not include
-        displacement
+        `SweepTest`
+            the raw or averaged displacement data for this test
 
         Raises
         ------
@@ -2786,12 +2798,18 @@ class FreqSweepTest:
     def _get_avg(self, field):
         avg_ax = []
 
+        params_to_avg = []
         for p in ("Amplitude", "Frequency"):
-            if p in field.params and field.params[p].Tn > 1:
-                avg_ax.append(field.params[p].t_axis - 1)
+            if p in field.raw.names and field.raw.names[p].Tn > 1:
+                avg_ax.append(field.raw.names[p].t_axis)
+                params_to_avg.append(p)
 
         if len(avg_ax) > 0:
-            return np.mean(field.raw, axis=tuple(avg_ax))
+            data = field.raw[{s:0 for s in params_to_avg}]
+            for s in params_to_avg:
+                data.names[s].trial.values = ["average"]
+            data.Y = np.mean(field.raw, axis=tuple(avg_ax))
+            return data
         else:
             return field.raw
 
@@ -2800,9 +2818,13 @@ class FreqSweepTest:
 
         Returns
         -------
-        (freq, axis)
-            tuple containing the unit-conscious frequency data for this test
-            and the axis in the data arrays which correspond to frequency
+        `IndependentVariable`
+            frequency data for this test
+        
+        Raises
+        ------
+        KeyError
+            if the test contains no frequency data
         """
 
         if not self.dataLoaded:
@@ -2814,24 +2836,22 @@ class FreqSweepTest:
                     "No frequency data available for test " + self.test.name
                 )
             else:
-                return (
-                    self.disp.names["Frequency"].values * units.Hz,
-                    self.disp.names["Frequency"].axis,
-                )
+                return self.disp.raw.names["Frequency"]
         else:
-            return (
-                self.force.names["Frequency"].values * units.Hz,
-                self.force.names["Frequency"].axis,
-            )
+            return self.force.raw.names["Frequency"]
 
     def get_ampl(self):
-        """Gets the amplitude parameter data for this test.
+        """Get the amplitude parameter data for this test.
 
         Returns
         -------
-        (ampl, axis)
-            tuple containing the unit-conscious frequency data for this test
-            and the axis in the data arrays which correspond to frequency
+        `IndependentVariable`
+            amplitude data for this test
+        
+        Raises
+        ------
+        KeyError
+            if the test contains no amplitude data
         """
 
         if not self.dataLoaded:
@@ -2843,15 +2863,9 @@ class FreqSweepTest:
                     "No amplitude data available for test " + self.test.name
                 )
             else:
-                return (
-                    self.disp.names["Amplitude"].values * units.volts,
-                    self.disp.names["Amplitude"].axis,
-                )
+                return self.disp.raw.names["Amplitude"]
         else:
-            return (
-                self.force.names["Amplitude"].values * units.volts,
-                self.force.names["Amplitude"].axis,
-            )
+            return self.force.names["Amplitude"]
 
     def get_force(self, avg=False):
         """
