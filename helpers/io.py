@@ -16,12 +16,12 @@
 # it under the terms of the GNU Lesser General Public License as published
 # by the Free Software Foundation, either version 3 of the License, or
 # (at your option) any later version.
-
+#
 # This program is distributed in the hope that it will be useful,
 # but WITHOUT ANY WARRANTY; without even the implied warranty of
 # MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
 # GNU Lesser General Public License for more details.
-
+#
 # You should have received a copy of the GNU Lesser General Public License
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 #
@@ -1476,6 +1476,11 @@ class IndependentVariable:
             return self.trial.trials
         else:
             raise AttributeError(f"Attribute {attr} not found")
+    
+    def index(self, obj):
+        """Index subset of values by `obj`."""
+        
+        raise NotImplementedError("TODO: not implemented yet")
 
 
 class Trial:
@@ -1497,6 +1502,11 @@ class Trial:
             return self.iv.__getattribute__(attr)
         else:
             raise AttributeError(f"Attribute {attr} not found")
+    
+    def index(self, obj):
+        """Index a subset of trial indices."""
+        
+        raise NotImplementedError("TODO: not implemented")
 
 
 class DependentVariable:
@@ -1981,7 +1991,7 @@ class SweepTest:
             iv_copy = iv.copy()
             iv_copy.axis = axes_map[iv.axis]
             idx_obj = idx[iv.axis]
-            if isinstance(idx_obj, slice):
+            if isinstance(idx_obj, slice) or isinstance(idx_obj, int):
                 iv_copy.values = iv.values[idx_obj].copy()
             elif isinstance(idx_obj, list):
                 iv_copy.values = iv.values[np.array(idx_obj).flatten()]
@@ -1998,7 +2008,7 @@ class SweepTest:
                 trial_copy = Trial(iv_copy)
                 trial_copy.axis = axes_map[iv.t_axis]
                 idx_obj = idx[iv.t_axis]
-                if isinstance(idx_obj, slice):
+                if isinstance(idx_obj, slice) or isinstance(idx_obj, int):
                     trial_copy.trials = iv.trial.trials[idx_obj].copy()
                 elif isinstance(idx_obj, list):
                     trial_copy.trials = iv.trial.trials[np.array(idx_obj).flatten()]
