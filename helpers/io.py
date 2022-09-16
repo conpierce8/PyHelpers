@@ -1554,17 +1554,18 @@ class DependentVariable:
     def __init__(self):
         self._name = None
         self.name = None
-        self.axis = None
         self.idx = None
         self.col = None
+        self.data = None
 
     def copy(self):
         dv = DependentVariable()
         dv._name = self._name
         dv.name = self.name
-        dv.axis = self.axis
         dv.idx = self.idx
         dv.col = self.col
+        if self.data is not None:
+            dv.data = self.data.copy()
         return dv
 
 
@@ -1778,7 +1779,7 @@ class SweepTest:
         for i in range(len(self.Y.shape)):
             shape[i] = self.Y.shape[i]
             if self.axes[i] == DependentVariable:
-                shape[DependentVariable] = self.Y.shape[i]
+                shape[DependentVariable] = len(self.dep_vars)
             else:
                 shape[self.axes[i].name] = self.Y.shape[i]
         return shape
@@ -1810,10 +1811,7 @@ class SweepTest:
                         "Cannot index by independent variable: '" + idx + "'"
                     )
             elif idx in self.names:
-                try:
-                    return self[self.names[idx]._name]
-                except IndexError:
-                    raise IndexError("No dependent variable named " + idx)
+                return self[self.names[idx]._name]
             else:
                 raise IndexError("No variable named " + idx)
         elif isinstance(idx, DependentVariable):  # Scalar index by a dependent variable
@@ -1827,24 +1825,26 @@ class SweepTest:
                     _st._names[iv_copy._name] = iv_copy
                     if iv_copy.trial is not None:
                         trial_copy = Trial(iv_copy)
-                        trial_copy.axis = iv.trial.axis - 1
+                        trial_copy.axis = iv.trial.axis
                         trial_copy.trials = iv.trial.trials
                         _st.axes[trial_copy.axis] = trial_copy
                 dv = idx.copy()
-                dv.axis = None
-                dv.idx = None
+                dv.idx = 0
                 _st.dep_vars.append(dv)
-                slc = tuple([slice(None) for i in self.ind_vars] + [idx.axis, ...])
-                _st.P = 0
+                _st.names[dv.name] = dv
+                _st._names[dv._name] = dv
+                _st.P = 1
                 _st.N = self.N
                 _st.num_t_axes = self.num_t_axes
-                _st.Y = self.Y[slc]
                 return _st
             else:
                 raise IndexError("No such dependent variable: " + str(idx))
         elif isinstance(idx, int) or isinstance(idx, float):
             if self.dim == 1:
-                return self[(idx,)]
+                if isinstance(idx, int):
+                    return self[(idx,)]
+                else:
+                    return self[(np.array([idx]),)]
             else:
                 raise IndexError(
                     "Scalar indexing not supported for {n:d}D array".format(n=self.dim)
@@ -1872,6 +1872,9 @@ class SweepTest:
                         )
                     )
             else:
+                idx_dict = {self.axes[i].name: item for i, item in enumerate(idx)}
+                idx_dict[DependentVariable] = self.dep_vars
+                return self[idx_dict]
                 _has_adv_idx = False
                 _adv_idxs = []
                 _adv_idxs_contig = True

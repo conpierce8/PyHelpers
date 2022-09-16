@@ -400,7 +400,7 @@ def plot_fs_test(
     averaged=False,
     axes_types=("lin", "lin"),
     param_subplots=("A", None),
-    param_cycler=cycler(
+    param_cycler=cycler.cycler(
         color=[
             "1f77b4",
             "ff7f0e",
