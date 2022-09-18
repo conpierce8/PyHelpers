@@ -8,7 +8,7 @@
 #
 # Author:   Connor D. Pierce
 # Created:  2019-03-28 12:46
-# Modified: 2022-09-12 15:28:43
+# Modified: 2022-09-17 22:58:10
 #
 # Copyright (c) 2019-2022 Connor D. Pierce
 #
@@ -109,7 +109,7 @@ def load_data(fname, src="exp", complexCols=[]):
                 line_offset += 1
         elif src == "osc":
             if line.find("TIME,") == 0:
-                headings = line[:-1].split(",")
+                headings = line.strip().split(",")
                 if headings[-1] == "":
                     headings = headings[:-1]
                 break
@@ -117,14 +117,14 @@ def load_data(fname, src="exp", complexCols=[]):
                 line_offset += 1
         elif src == "sim":
             if line.startswith("%"):
-                lastline = line
+                lastline = line.strip()
                 line_offset += 1
             else:
                 headings = lastline
                 break
         elif src == "dma":
             if line.find("StartOfData") > -1:
-                headings = line.split("\t")
+                headings = line.strip().split("\t")
                 if headings[-1] == "":
                     headings = headings[:-1]
                 line_offset += 1
@@ -134,7 +134,7 @@ def load_data(fname, src="exp", complexCols=[]):
         elif src == "mcz":
             line_offset += 1
             if line.find("Position ,") > -1:
-                headings = line.split(",")
+                headings = line.strip().split(",")
                 mcz_header_found = True
             elif mcz_header_found:
                 units = line.split(",")
@@ -142,10 +142,10 @@ def load_data(fname, src="exp", complexCols=[]):
         elif src == "mcz_raw":
             line_offset += 1
             if line.find("Position \t") > -1:
-                headings = line.split("\t")
+                headings = line.strip().split("\t")
                 mcz_header_found = True
             elif mcz_header_found:
-                units = line.split("\t")
+                units = line.strip().split("\t")
                 break
     fl.close()
     logger.debug("Skipping " + str(line_offset) + " lines")
