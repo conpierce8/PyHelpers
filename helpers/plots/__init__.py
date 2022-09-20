@@ -8,7 +8,7 @@
 #
 # Author:   Connor D. Pierce
 # Created:  2019-03-28 12:46
-# Modified: 2022-09-01 15:54:04
+# Modified: 2022-09-20 13:07:53
 #
 # Copyright (c) 2019-2022 Connor D. Pierce
 #
@@ -289,7 +289,3 @@ class FigureRegistry:
         self._displayFigure(figDetails)
 
         return figDetails
-
-
-# Import modules from this package
-from . import qs, fs
