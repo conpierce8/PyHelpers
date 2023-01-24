@@ -1835,7 +1835,7 @@ class SweepTest:
                 dv.axis = None
                 dv.idx = None
                 _st.dep_vars.append(dv)
-                slc = tuple([slice(None) for i in self.ind_vars] + [idx.axis, ...])
+                slc = tuple([slice(None) for i in range(idx.axis)] + [idx.idx, ...])
                 _st.P = 0
                 _st.N = self.N
                 _st.num_t_axes = self.num_t_axes
@@ -2100,7 +2100,7 @@ class SweepTest:
         if self.dep_vars[0].axis is None:  # Previously indexed by a scalar
             dv_copy = self.dep_vars[0].copy()
             dv_copy.idx = None
-            dv_copy.axis = axes_map[self.dep_vars[0].axis]
+            dv_copy.axis = None#axes_map[self.dep_vars[0].axis]
             _st.dep_vars.append(dv_copy)
             _st.P = 0
         elif axes_map[self.dep_vars[0].axis] is None:  # Currently indexed by a scalar
@@ -2681,7 +2681,7 @@ class FreqSweepTest:
             theta = disp["Theta"]
 
             R.Y = self.disp.sensor.toPhysical(
-                R.Y * np.exp(1j * np.pi * theta.Y[idxT] / 180) * ureg.volt,
+                R.Y * np.exp(1j * np.pi * theta.Y / 180) * ureg.volt,
                 gain=self.disp.gain,
             )
             self.disp.raw = R
@@ -2720,42 +2720,42 @@ class FreqSweepTest:
         self.dataLoaded = True
     
     def _check_data_consistency(self):
-        if self.disp.N != self.force.N:
+        if self.disp.raw.N != self.force.raw.N:
             # Mismatched number of independent parameters
             raise DataInconsistentError(
                 "Force and displacement have different number of "
                 + "parameters for test "
                 + self.test.name
             )
-        for iv in self.disp.ind_vars:
-            if iv.name not in self.force.names:
+        for iv in self.disp.raw.ind_vars:
+            if iv.name not in self.force.raw.names:
                 raise DataInconsistentError(
                     self.test.name
                     + " has different force and "
                     + "displacement parameters"
                 )
-            if not np.allclose(iv.values, self.force.names[iv.name].values, atol=0):
+            if not np.allclose(iv.values, self.force.raw.names[iv.name].values, atol=0):
                 raise DataInconsistentError(
                     "Found different parameter values for "
                     + iv.name
                     + "in test "
                     + self.test.name
                 )
-            if iv.Tn != self.force.names[iv.name].Tn:
+            if iv.Tn != self.force.raw.names[iv.name].Tn:
                 raise DataInconsistentError(
                     "Found different number of repetitions for "
                     + iv.name
                     + "in test "
                     + self.test.name
                 )
-            if iv.axis != self.force.names[iv.name].axis:
+            if iv.axis != self.force.raw.names[iv.name].axis:
                 raise DataInconsistentError(
                     "Found different axis for "
                     + iv.name
                     + " in test "
                     + self.test.name
                 )
-            if iv.t_axis != self.force.names[iv.name].t_axis:
+            if iv.t_axis != self.force.raw.names[iv.name].t_axis:
                 raise DataInconsistentError(
                     "Found different trial axis for "
                     + iv.name
@@ -2978,4 +2978,4 @@ class FreqSweepTest:
         cross-sectional area is available
         """
 
-        return self.get_stress(avg) / self.get_strain(avg)
+        return self.get_stress(avg).Y / self.get_strain(avg).Y
