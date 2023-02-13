@@ -8,24 +8,29 @@
 #
 # Author:   Connor D. Pierce
 # Created:  2019-03-28 12:46
-# Modified: 2022-09-17 22:58:10
+# Modified: 2023-02-12 16:52:06
 #
-# Copyright (c) 2019-2022 Connor D. Pierce
+# Copyright (c) 2019-2023 Connor D. Pierce
 #
-# This program is free software: you can redistribute it and/or modify
-# it under the terms of the GNU Lesser General Public License as published
-# by the Free Software Foundation, either version 3 of the License, or
-# (at your option) any later version.
+# Permission is hereby granted, free of charge, to any person obtaining a copy
+# of this software and associated documentation files (the "Software"), to deal
+# in the Software without restriction, including without limitation the rights
+# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+# copies of the Software, and to permit persons to whom the Software is
+# furnished to do so, subject to the following conditions:
 #
-# This program is distributed in the hope that it will be useful,
-# but WITHOUT ANY WARRANTY; without even the implied warranty of
-# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-# GNU Lesser General Public License for more details.
+# The above copyright notice and this permission notice shall be included in all
+# copies or substantial portions of the Software.
 #
-# You should have received a copy of the GNU Lesser General Public License
-# along with this program.  If not, see <https://www.gnu.org/licenses/>.
+# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+# AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+# SOFTWARE.
 #
-# SPDX-License-Identifier: LGPL-3.0-or-later
+# SPDX-License-Identifier: MIT
 
 
 """
@@ -34,11 +39,8 @@ from simulations.
 """
 
 
-### Imports ====================================================================
-#
-# Import all packages required to handle input, output, and storage of data and
-# handle unit conversions.
-
+## Imports
+import logging
 import numpy as np
 import os
 import pint
@@ -46,21 +48,18 @@ import scipy as sp
 import typing
 import yaml
 
-from helpers import ureg, Qty, EmptyObject, factors
+from helpers import factors
+from helpers.units import ureg, Qty, EmptyObject, factors
 from scipy import signal, stats
 
-# Set up logging
-import logging
-
+## Set up logging
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.WARNING)
 
 
-### Function Definitions =======================================================
-
-# Create a function so we can easily augment the input settings with
-# the output settings to complete a full test definition
+## Functions
 def augmentInput(inData, outData):
+    """Augment input settings with output settings to make a full test definition."""
     tmp = inData.copy()
     for key in outData:
         tmp[key] = outData[key]
@@ -279,9 +278,7 @@ def getAvgData(pIdx, sweepStartIdx, rawData, RCol):
     return avg
 
 
-### Exceptions =================================================================
-
-
+## Exceptions
 class DataNotLoadedError(Exception):
     """
     Raised by a test object (such as `QuasistaticTest`) when the user requests
@@ -321,9 +318,7 @@ class DataInconsistentError(Exception):
     pass
 
 
-### Classes ====================================================================
-
-
+## Classes
 class Database:
     """
     Manages the loading and storage of test data so that I/O operations (i.e.
@@ -2626,7 +2621,7 @@ class FreqSweepTest:
             )
         else:
             setup = specData["setups"][_test.setupName]
-
+            _specimen.batch = specData["batch"]
             if specData["geometry"]["type"] == "none":
                 _specimen.noSS = True
                 _test.preComp = Qty(0, "in")

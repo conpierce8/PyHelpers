@@ -1,14 +1,13 @@
 #! python3
 # -*- coding: utf-8 -*-
 #
-# __init__.py
+# units.py
 #
-# init file for the `helpers` package. Sets up scientific unit handling via `pint`
-# and defines some generic useful functions and classes.
+# Customize `pint`'s handling of units.
 #
 # Author:   Connor D. Pierce
-# Created:  2020-11-24 16:08
-# Modified: 2023-02-12 15:05:19
+# Created:  2023-02-12 14:49:04
+# Modified: 2023-02-12 21:48:50
 #
 # Copyright (c) 2023 Connor D. Pierce
 #
@@ -33,39 +32,16 @@
 # SPDX-License-Identifier: MIT
 
 
-"""
-Utilities for scientific unit handling, input/output of experiment and
-simulation data, and plotting results.
-"""
+"""Customize `pint` for automatic unit conversions."""
 
 
 # Imports
-from helpers import io, plots, units
-from helpers.units import ureg, Qty
+import pint
 
 
-__all__ = ["io", "plots", "units", "ureg", "Qty", "factors", "EmptyObject"]
-
-
-## Functions
-def factors(x):
-    """Calculate all factors of the positive integer `x`."""
-
-    return [i for i in range(1, x + 1) if x % i == 0]
-
-
-## Classes
-class EmptyObject:
-    """Generic data container with no instance members.
-
-    Use this class by creating an instance and assigning variables to it, e.g.:
-
-    ```
-    varName = EmptyObject()
-    varName.member1 = 1
-    varName.member2 = "Hello, world!"
-    varName.member3 = ["It's", "nice", "to", "meet", "you."]
-    ```
-    """
-
-    pass
+# Customize `pint` for unit conversions in all `helpers` submodules. All modules should
+# use the unit registry `ureg` to ensure that data loaded with units can be converted.
+ureg = pint.UnitRegistry()
+ureg.define("percent = 1/100 = pct")
+# Create an abbreviation for `pint.UnitRegistry.Quantity`
+Qty = ureg.Quantity
