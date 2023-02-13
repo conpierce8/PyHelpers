@@ -8,24 +8,29 @@
 #
 # Author:   Connor D. Pierce
 # Created:  2019-03-28 12:46
-# Modified: 2022-09-12 15:28:43
+# Modified: 2023-02-13 06:19:22
 #
-# Copyright (c) 2019-2022 Connor D. Pierce
+# Copyright (c) 2019-2023 Connor D. Pierce
 #
-# This program is free software: you can redistribute it and/or modify
-# it under the terms of the GNU Lesser General Public License as published
-# by the Free Software Foundation, either version 3 of the License, or
-# (at your option) any later version.
+# Permission is hereby granted, free of charge, to any person obtaining a copy
+# of this software and associated documentation files (the "Software"), to deal
+# in the Software without restriction, including without limitation the rights
+# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+# copies of the Software, and to permit persons to whom the Software is
+# furnished to do so, subject to the following conditions:
 #
-# This program is distributed in the hope that it will be useful,
-# but WITHOUT ANY WARRANTY; without even the implied warranty of
-# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-# GNU Lesser General Public License for more details.
+# The above copyright notice and this permission notice shall be included in all
+# copies or substantial portions of the Software.
 #
-# You should have received a copy of the GNU Lesser General Public License
-# along with this program.  If not, see <https://www.gnu.org/licenses/>.
+# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+# AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+# SOFTWARE.
 #
-# SPDX-License-Identifier: LGPL-3.0-or-later
+# SPDX-License-Identifier: MIT
 
 
 """
@@ -34,32 +39,27 @@ from simulations.
 """
 
 
-### Imports ====================================================================
-#
-# Import all packages required to handle input, output, and storage of data and
-# handle unit conversions.
-
+## Imports
+import logging
 import numpy as np
 import os
+import pint
 import scipy as sp
 import typing
 import yaml
 
-from helpers import ureg, Qty, EmptyObject, factors
+from helpers import factors
+from helpers.units import ureg, Qty, EmptyObject, factors
 from scipy import signal, stats
 
-# Set up logging
-import logging
-
+## Set up logging
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.WARNING)
 
 
-### Function Definitions =======================================================
-
-# Create a function so we can easily augment the input settings with
-# the output settings to complete a full test definition
+## Functions
 def augmentInput(inData, outData):
+    """Augment input settings with output settings to make a full test definition."""
     tmp = inData.copy()
     for key in outData:
         tmp[key] = outData[key]
@@ -108,7 +108,7 @@ def load_data(fname, src="exp", complexCols=[]):
                 line_offset += 1
         elif src == "osc":
             if line.find("TIME,") == 0:
-                headings = line[:-1].split(",")
+                headings = line.strip().split(",")
                 if headings[-1] == "":
                     headings = headings[:-1]
                 break
@@ -116,14 +116,14 @@ def load_data(fname, src="exp", complexCols=[]):
                 line_offset += 1
         elif src == "sim":
             if line.startswith("%"):
-                lastline = line
+                lastline = line.strip()
                 line_offset += 1
             else:
                 headings = lastline
                 break
         elif src == "dma":
             if line.find("StartOfData") > -1:
-                headings = line.split("\t")
+                headings = line.strip().split("\t")
                 if headings[-1] == "":
                     headings = headings[:-1]
                 line_offset += 1
@@ -133,7 +133,7 @@ def load_data(fname, src="exp", complexCols=[]):
         elif src == "mcz":
             line_offset += 1
             if line.find("Position ,") > -1:
-                headings = line.split(",")
+                headings = line.strip().split(",")
                 mcz_header_found = True
             elif mcz_header_found:
                 units = line.split(",")
@@ -141,10 +141,10 @@ def load_data(fname, src="exp", complexCols=[]):
         elif src == "mcz_raw":
             line_offset += 1
             if line.find("Position \t") > -1:
-                headings = line.split("\t")
+                headings = line.strip().split("\t")
                 mcz_header_found = True
             elif mcz_header_found:
-                units = line.split("\t")
+                units = line.strip().split("\t")
                 break
     fl.close()
     logger.debug("Skipping " + str(line_offset) + " lines")
@@ -278,9 +278,7 @@ def getAvgData(pIdx, sweepStartIdx, rawData, RCol):
     return avg
 
 
-### Exceptions =================================================================
-
-
+## Exceptions
 class DataNotLoadedError(Exception):
     """
     Raised by a test object (such as `QuasistaticTest`) when the user requests
@@ -320,9 +318,7 @@ class DataInconsistentError(Exception):
     pass
 
 
-### Classes ====================================================================
-
-
+## Classes
 class Database:
     """
     Manages the loading and storage of test data so that I/O operations (i.e.
@@ -2102,7 +2098,7 @@ class SweepTest:
         if self.dep_vars[0].axis is None:  # Previously indexed by a scalar
             dv_copy = self.dep_vars[0].copy()
             dv_copy.idx = None
-            dv_copy.axis = axes_map[self.dep_vars[0].axis]
+            dv_copy.axis = None#axes_map[self.dep_vars[0].axis]
             _st.dep_vars.append(dv_copy)
             _st.P = 0
         elif axes_map[self.dep_vars[0].axis] is None:  # Currently indexed by a scalar
@@ -2628,7 +2624,7 @@ class FreqSweepTest:
             )
         else:
             setup = specData["setups"][_test.setupName]
-
+            _specimen.batch = specData["batch"]
             if specData["geometry"]["type"] == "none":
                 _specimen.noSS = True
                 _test.preComp = Qty(0, "in")
@@ -2683,7 +2679,7 @@ class FreqSweepTest:
             theta = disp["Theta"]
 
             R.Y = self.disp.sensor.toPhysical(
-                R.Y * np.exp(1j * np.pi * theta.Y[idxT] / 180) * ureg.volt,
+                R.Y * np.exp(1j * np.pi * theta.Y / 180) * ureg.volt,
                 gain=self.disp.gain,
             )
             self.disp.raw = R
@@ -2722,42 +2718,42 @@ class FreqSweepTest:
         self.dataLoaded = True
     
     def _check_data_consistency(self):
-        if self.disp.N != self.force.N:
+        if self.disp.raw.N != self.force.raw.N:
             # Mismatched number of independent parameters
             raise DataInconsistentError(
                 "Force and displacement have different number of "
                 + "parameters for test "
                 + self.test.name
             )
-        for iv in self.disp.ind_vars:
-            if iv.name not in self.force.names:
+        for iv in self.disp.raw.ind_vars:
+            if iv.name not in self.force.raw.names:
                 raise DataInconsistentError(
                     self.test.name
                     + " has different force and "
                     + "displacement parameters"
                 )
-            if not np.allclose(iv.values, self.force.names[iv.name].values, atol=0):
+            if not np.allclose(iv.values, self.force.raw.names[iv.name].values, atol=0):
                 raise DataInconsistentError(
                     "Found different parameter values for "
                     + iv.name
                     + "in test "
                     + self.test.name
                 )
-            if iv.Tn != self.force.names[iv.name].Tn:
+            if iv.Tn != self.force.raw.names[iv.name].Tn:
                 raise DataInconsistentError(
                     "Found different number of repetitions for "
                     + iv.name
                     + "in test "
                     + self.test.name
                 )
-            if iv.axis != self.force.names[iv.name].axis:
+            if iv.axis != self.force.raw.names[iv.name].axis:
                 raise DataInconsistentError(
                     "Found different axis for "
                     + iv.name
                     + " in test "
                     + self.test.name
                 )
-            if iv.t_axis != self.force.names[iv.name].t_axis:
+            if iv.t_axis != self.force.raw.names[iv.name].t_axis:
                 raise DataInconsistentError(
                     "Found different trial axis for "
                     + iv.name
@@ -2980,4 +2976,4 @@ class FreqSweepTest:
         cross-sectional area is available
         """
 
-        return self.get_stress(avg) / self.get_strain(avg)
+        return self.get_stress(avg).Y / self.get_strain(avg).Y

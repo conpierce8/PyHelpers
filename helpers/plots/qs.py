@@ -3,57 +3,67 @@
 #
 # qs.py
 #
-# Functions for plotting frequency-sweep results.
+# Functions for plotting quasi-static results.
 #
 # Author:   Connor D. Pierce
 # Created:  2021-03-31 11:33
-# Modified: 2022-09-01 16:05:51
+# Modified: 2023-02-12 21:51:14
 #
-# Copyright (c) 2021-2022 Connor D. Pierce
+# Copyright (c) 2021-2023 Connor D. Pierce
 #
-# This program is free software: you can redistribute it and/or modify
-# it under the terms of the GNU Lesser General Public License as published
-# by the Free Software Foundation, either version 3 of the License, or
-# (at your option) any later version.
+# Permission is hereby granted, free of charge, to any person obtaining a copy
+# of this software and associated documentation files (the "Software"), to deal
+# in the Software without restriction, including without limitation the rights
+# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+# copies of the Software, and to permit persons to whom the Software is
+# furnished to do so, subject to the following conditions:
 #
-# This program is distributed in the hope that it will be useful,
-# but WITHOUT ANY WARRANTY; without even the implied warranty of
-# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-# GNU Lesser General Public License for more details.
+# The above copyright notice and this permission notice shall be included in all
+# copies or substantial portions of the Software.
 #
-# You should have received a copy of the GNU Lesser General Public License
-# along with this program.  If not, see <https://www.gnu.org/licenses/>.
+# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+# AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+# SOFTWARE.
 #
-# SPDX-License-Identifier: LGPL-3.0-or-later
+# SPDX-License-Identifier: MIT
 
 
 """Functions for plotting quasi-static test results."""
 
 
 ### Imports ====================================================================
+import logging
 import matplotlib as mpl
 import numpy as np
 
-from helpers import ureg, Qty, EmptyObject
 from helpers.plots import get_style
+from helpers.units import ureg, Qty, EmptyObject
 from IPython.display import display, Image, Markdown
-from matplotlib import cm
-from matplotlib import pyplot as plt
+from matplotlib import cm, pyplot as plt
 from matplotlib.animation import FuncAnimation
 from matplotlib.figure import Figure
 from scipy import signal
 from scipy.linalg import lstsq
 from scipy.stats import linregress
 
-# Configure logging
-import logging
 
+__all__ = [
+    "ss",
+    "ss_seq",
+    "LivePlot",
+]
+
+
+## Configure logging
 logger = logging.getLogger("helpers.plots.qs")
 # TODO: finish setting up logging
 
-### Function Definitions =======================================================
 
-
+## Functions
 def ss(ax, testData, label=None, units={}, loading_only=False):
     """
     Plots quasistatic stress-strain results.
