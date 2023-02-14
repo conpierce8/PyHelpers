@@ -7,7 +7,7 @@
 #
 # Author:   Connor D. Pierce
 # Created:  2021-03-31 11:33
-# Modified: 2023-02-12 21:51:14
+# Modified: 2023-02-13 15:27:11
 #
 # Copyright (c) 2021-2023 Connor D. Pierce
 #
@@ -40,7 +40,7 @@ import logging
 import matplotlib as mpl
 import numpy as np
 
-from helpers.plots import get_style
+from helpers.plots.utils import get_style
 from helpers.units import ureg, Qty, EmptyObject
 from IPython.display import display, Image, Markdown
 from matplotlib import cm, pyplot as plt

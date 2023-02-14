@@ -8,7 +8,7 @@
 #
 # Author:   Connor D. Pierce
 # Created:  2019-03-28 12:46
-# Modified: 2023-02-13 06:19:22
+# Modified: 2023-02-14 05:35:43
 #
 # Copyright (c) 2019-2023 Connor D. Pierce
 #
@@ -48,13 +48,18 @@ import scipy as sp
 import typing
 import yaml
 
-from helpers import factors
-from helpers.units import ureg, Qty, EmptyObject, factors
+from helpers.units import ureg, Qty, EmptyObject
+from helpers.utils import factors
 from scipy import signal, stats
+
 
 ## Set up logging
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.WARNING)
+
+## For numpy type-checking
+_FLOAT_TYPES = (np.float16, np.float32, np.float64, np.complex64, np.complex128)
+_INT_TYPES = (np.int0, np.int16, np.int32, np.int64, np.int8)
 
 
 ## Functions
@@ -276,6 +281,41 @@ def getAvgData(pIdx, sweepStartIdx, rawData, RCol):
 
     avg = avg / plt_num
     return avg
+
+
+def apply_units(data, units):
+    if units is None:
+        return data * ureg.dimensionless
+    elif isinstance(units, str):
+        return ureg.Quantity(data, units)
+    elif isinstance(units, pint.Unit):
+        return raw_data[0 : var._blocksize : prev_multiplicity, var.col] * units
+
+
+if True:
+
+    def reshape_adv_idx(t: typing.Iterable, N: int, i: int, lv: int = 0):
+        """Reshape advanced index to a broadcastable shape.
+
+        Given a 1-D array `t` which acts as an index to axis `i` of an `N`-D array, reshape
+        `t` into an `i`-D array of shape `(t.size, ) + (1, ) * (N - 1 - i)`.
+        """
+
+        if lv == 0:
+            if lv == N - 1 - i:
+                return t
+            else:
+                return [reshape_adv_idx(t_i, N, i, lv + 1) for t_i in t]
+        else:
+            if lv == N - 1 - i:
+                return [t]
+            else:
+                return [reshape_adv_idx(t, N, i, lv + 1)]
+
+else:
+
+    def reshape_adv_idx(t: typing.Iterable, N: int, i: int):
+        return np.array(t).reshape((t.size,) + (1,) * (N - i - 1))
 
 
 ## Exceptions
@@ -1437,7 +1477,7 @@ class IndependentVariable:
 
     Contains the following fields, which can be accessed directly:
     --------------------------------------------------------------
-    _name : str
+    id : str
         Internal name (e.g. "x0", "x1", etc.)
     name : str
         Display name from the file (e.g. "Frequency", "Amplitude")
@@ -1447,17 +1487,18 @@ class IndependentVariable:
         Column number (0-based) in the file from which the values of this
         variable are extracted
     t_axis : int
-        Axis in the Y array that is parameterized by different trials of this
-        variable
-    values : numpy.ndarray(dtype=numpy.float64)
-        The parameter values of this variable
+        Axis in the Y array that is parameterized by different trials of this variable
     Tn : int
         The number of trials for this variable
+    trial : `Trial`
+        Information about repeated trials over this variable
+    values : numpy.ndarray(dtype=numpy.float64)
+        The parameter values of this variable
 
     """
 
     def __init__(self):
-        self._name = None
+        self.id = None
         self.name = None
         self.axis = None
         self.col = None
@@ -1466,10 +1507,10 @@ class IndependentVariable:
 
     def copy(self):
         iv = IndependentVariable()
-        iv._name = self._name
-        iv.name = self.name
+        iv.id = self.id
         iv.axis = self.axis
         iv.col = self.col
+        iv.name = self.name
         iv.trial = None
         iv.values = None if self.values is None else self.values.copy()
         return iv
@@ -1493,11 +1534,6 @@ class IndependentVariable:
         else:
             raise AttributeError(f"Attribute {attr} not found")
 
-    def index(self, obj):
-        """Index subset of values by `obj`."""
-
-        raise NotImplementedError("TODO: not implemented yet")
-
 
 class Trial:
     """Wrapper class indicating a trial axes of an independent variable."""
@@ -1511,118 +1547,183 @@ class Trial:
 
     def __getattr__(self, attr):
         if attr == "name":
-            return self.iv.name + " trial"
-        elif attr == "_name":
-            return self.iv._name + "_trial"
+            return f"Trial({self.iv.name})"
+        elif attr == "id":
+            return self.iv.id + "_t"
         elif attr in ("col",):
             return self.iv.__getattribute__(attr)
         else:
             raise AttributeError(f"Attribute {attr} not found")
 
-    def index(self, obj):
-        """Index a subset of trial indices."""
-
-        raise NotImplementedError("TODO: not implemented")
-
 
 class DependentVariable:
-    """
-    Holds general information about a dependent variable in a SweepTest.
+    """Data for a dependent variable in a SweepTest.
 
     Contains the following fields, which can be accessed directly:
 
-    _name : str
+    id : `str`
         Internal name (e.g. "y0", "y1", etc.)
-    name : str
-        Display name from the file (e.g. "Frequency", "Amplitude")
-    axis : int
-        Axis in the Y array that is parameterized by the different dependent
-        variables.
-    idx : int
-        Index (along axis `axis` in the Y array) that holds the value of this
-        independent variable.
-    col : int
+    col : `int`
         Column number (0-based) in the file from which the values of this
         variable are extracted
-
+    data : `pint.Quantity` or `numpy.ndarray`
+        The measured data from all trials and all values of the independent variables
+    name : `str`
+        Display name from the file (e.g. "Frequency", "Amplitude")
     """
 
     def __init__(self):
-        self._name = None
-        self.name = None
-        self.idx = None
+        self.id = None
         self.col = None
         self.data = None
+        self.idx = None
+        self.name = None
 
-    def copy(self):
+    def copy(self, new_data=None):
         dv = DependentVariable()
-        dv._name = self._name
-        dv.name = self.name
-        dv.idx = self.idx
+        dv.id = self.id
         dv.col = self.col
-        if self.data is not None:
+        dv.idx = self.idx
+        dv.name = self.name
+        if new_data is not None:
+            dv.data = new_data
+        elif self.data is not None:
             dv.data = self.data.copy()
         return dv
 
 
 class SweepTest:
-    """
-    Loads and organizes the data associated with a general parametric sweep. A
-    general parametric sweep consists of a set of tests in which one or more
-    independent variables (the "parameters") are systematically varied over a
-    set of values. A parametric sweep with `N` parameters measures the response
-    of a system over a discretized region of `N`-space. The system response may
-    be a scalar or a vector
+    """Load and organize data from a general parametric sweep.
+
+    A general parametric sweep consists of a set of tests in which one or more
+    independent variables (the "parameters") are systematically varied over a grid of
+    values. A parametric sweep with `N` parameters measures the response of a system
+    over a discretized region of `N`-space. For each combination of the input
+    parameters, the system response is characterized a scalar or vector value.
 
     Let `y` be a `P`-dimensional function of `N` independent variables; that is,
     let
 
-        y = [ y_0, y_1, ..., y_p, ... y_(P-1) ]
+    ```
+    y = [ y_0, y_1, ..., y_p, ... y_(P-1) ]                                     (1)
+    ```
 
     where
 
-        y_p = f( x_0, x_1, ..., x_n, ..., x_(N-1) )
+    ```
+    y_p = f( x_0, x_1, ..., x_n, ..., x_(N-1) )                                 (2)
+    ```
 
     with `0 <= p < P` and `0 <= n < N`. Let each of the independent variables
     `x_n` be parameterized into a discrete set of `M_n` values; that is, let
 
-        x_n = [ x_n[0], x_n[1], ..., x_n[m_n], ..., x_n[M_n - 1] ]
+    ```
+    x_n = [ x_n[0], x_n[1], ..., x_n[m_n], ..., x_n[M_n - 1] ]                  (3)
+    ```
 
     with `0 <= m_n < M_n`. Let the domain `X` of `y` be formed by all possible
-    combinations (i.e. the outer product) of the values in the vectors `x_n`,
-    such that:
+    combinations (i.e. the outer product) of the values in the vectors `x_n`, such that:
 
-        X[m_0,m_1,...,m_n,...,m_(N-1)] = [ x_0[m_0], x_1[m_1], ...,
-            x_n[m_n], ..., x_(N-1)[m_(N-1)] ]
+    ```
+    X.shape = (M_0, M_1, M_2, ..., M_n, ..., M_(N-1))                           (4)
+    X[m_0, m_1, ..., m_n, ..., m_(N-1)] = [
+        x_0[m_0], x_1[m_1], ..., x_n[m_n], ..., x_(N-1)[m_(N-1)]
+    ]                                                                           (5)
+    ```
 
-    for all `m_n`. Finally, let `y(X)` be evaluated `T_n` times for each
-    variable `x_n`, so that `y_p(x_n)` is `T_0*T_1*...*T_n*...*T_(N-1)`-valued.
+    for all `m_n`. Finally, let the parametric sweep be repeated `T_n` times over the
+    `n`th independent variable `x_n`. Thus `y_p(x)` is
+    `T_0 * T_1 * ... * T_n * ... * T_(N-1)`-valued for all `x` in `X`. The system
+    response `Y` over all `X` is characterized by an array of shape
 
-    Then the `p`th component of `y`, `y_p(x_n)`, can be expressed as an array of
-    shape `(T_0, T_1, ..., T_n, ..., T_(N-1))`, where
+    ```
+    (M_0, T_0, M_1, T_1, M_2, T_2, ..., M_n, T_n, ..., M_(N-1), T_(N-1), P)     (6)
+    ```
 
-        y_p(x_n)[t_0,t_1,...,t_n,...t_(N-1)]
+    where
 
-    is the value of `y[p](x_n)` for the `t_n`th iteration of the variable `x_n`,
+    ```
+    Y[i_0, t_0, i_1, t_1, ..., i_n, t_n, ..., i_(N-1), t_(N-1), p] = y_p (
+        x_0[i_0], x_1[i_1], ..., x_n[i_n], ..., x_(N-1)[i_(N-1)]
+    )                                                                           (7)
+    ```
+
+    is the value of `y` for the `t_n`th iterations of the variables `x_n`,
     where `0 <= t_n < T_n`.
 
     # ACCESSING THE DATA IN THIS PARAMETRIC SWEEP
-    The data in this parametric sweep can be accessed in two different ways.
-    The first way is to directly index the array `Y` where the data is stored.
-    In this array, the first `N` axes correspond to the different values of the
-    independent variables `x_n`, followed by an axis corresponding to the `P`
-    components `y_p`, followed by `N` axes corresponding to the different trials
-    `t_n` of each independent variable. Thus, the axes ordering of this array is
-    as follows:
 
-        Y[m_0, m_1, ..., m_n, ..., m_(N-1), p, t_0, t_1, ..., t_n, ..., t_(N-1)]
+    The system response is stored in the `SweepTest.data` attribute, which is a `list`
+    of `DependentVariable` objects, with `len(SweepTest.data) == P`. Each
+    `DependentVariable` object contains a `data` attribute, which is a Numpy array or
+    Pint `Quantity` of shape `(M_0, T_0, M_1, T_1, ..., M_(N-1), T_(N-1)`. The physical
+    significance of each axis of `SweepTest.data` is stored in `IndependentVariable` and
+    `Trial` objects. These objects can be accessed from `SweepTest` by name, ID, or
+    order, from the `SweepTest.names`, `SweepTest.ids`, and `SweepTest.ind_vars`
+    attributes, respectively.
 
-    and the shape of the array is:
+    The system response can be accessed in two different ways. The first way is to
+    directly use the `data` arrays of the `SweepTest` and `DependentVariable` objects
+    where the data is stored. The axes in these arrays are ordered as in Equation (7)
+    above, with the first axis spanning the values of the independent variable `x_0`,
+    the second axis spanning the trials of `x_0`, the third axis spanning the values of
+    the independent variable `x_1`, the fourth axis spanning the trials of `x_1`, and
+    so on. If the variable `x_n` has only one trial, an axis is not allocated for that
+    variable, but a `Trial` object will still be present in the `names`, `ids`, and
+    `ind_vars` lists indicating the trial number for the variable `x_n`.
 
-        (M_0, M_1, ..., M_n, ..., M_(N-1), P, T_0, T_1, ..., T_n, ..., T_(N-1))
+    The second way to access the system response is by indexing `SweepTest`, much like
+    indexing of a Numpy array. Several indexing schemes are allowed, including indexing
+    by a string, by a `DependentVariable`, by a `Trial` or `Trial`s, or by one or
+    several values of an `IndependentVariable` or `IndependentVariable`s. The allowable
+    indexing schemes for a `SweepTest` object `st` are as follows:
 
-    Note that if the variable `x_n` is only repeated once, the array `Y` will
-    contain an axis of length 1 for the trial index `t_n`.
+    1.  Index a single component `y_p` of the system response by name, id, order, or
+        `DependentVariable` for all `x` in `X`:
+
+        ```
+        st[name: str]
+        st[id: str]
+        st[p: int]
+        st[dv: DependentVariable]
+        ```
+    2.  Index by `dict`. Allowable keys are `str`; instances of `IndependentVariable` or
+        `Trial`; or the `DependentVariable` class. String keys must be the name or ID of
+        an independent variable or trial. Trials of the independent variable named
+        `name` with ID `x0` may be indexed with the name `"Trial(name)"` or ID `"x0_t"`.
+        Allowable values for independent variables are integers, slices, floats, or
+        lists or `numpy.ndarrays` of integers or floats. Integers or arrays of integers
+        (as determined by the `dtype` of the array) cause the independent variable to be
+        indexed by position. Floats and arrays of floats cause the independent variable
+        to be indexed by value. Lists will be wrapped in a `numpy.ndarray` to determine
+        their type. In general, Numpy rules for basic and advanced indexing apply to the
+        indexing operation. However, all lists/arrays will be flattened before the
+        indexing operation, so the dimension (number of axes) of the data arrays will
+        never grow. Allowable values for trials are integers, slices, or lists of
+        integers. Trials are always indexed by position. Allowable values for
+        `DependentVariable` are strings, instances of `DependentVariable`, or lists of
+        strings and/or `DependentVariable` instances. Empty slices (index all components
+        of the corresponding axis) are assumed for any independent variable, trial, or
+        dependent variable that is not specified. When a scalar value is provided for
+        an independent variable or a trial, the dimension of the data arrays are reduced
+        by 1 and the corresponding axis is removed. Example usages are below
+
+        ```
+        st[{"Frequency": 0}]  # Index by scalar position
+        st[{"Frequency": 11.5}]  # Index by scalar value
+        st[{"Frequency": slice(0, 5)}]  # Index by position
+        st[{"Frequency": [4, 5, 6, 7, 8]}]  # Index by position (array)
+        st[{"Frequency", [1, 5.5, 10, 14.5, 19]}]  # Index by value (array)
+
+        st[
+            {"Amplitude": 0.25, "Frequency": 55.0}
+        ]  # Index by value; both "Amplitude" and "Frequency" axes are removed
+        st[
+            {"Amplitude": 0.25, "Frequency": [55.0]}
+        ]  # Index by value; "Frequency" axis is retained with size 1
+
+        st[{DependentVariable: "Velocity"}]  # Extract only the "Velocity" output
+        ```
     """
 
     def __init__(
@@ -1652,15 +1753,14 @@ class SweepTest:
             `load` for details.
         """
 
-        # Create collections so that the IndependentVariable and
-        # DependentVariable objects can be easily accessed by different
-        # attributes.
-        self.names = {}  # For accessing variable details by display name
+        # Create collections so that the IndependentVariable and DependentVariable
+        # objects can be easily accessed using different attributes.
+        self.ids = {}  # For accessing variable details by internal name
         self.axes = {}  # For accessing ind. var. details by axis number
-        self._names = {}  # For accessing variable details by internal name
-        self.dep_idx = {}  # For accessing dep. var details by index
-        self.ind_vars = []  # For storing ind. var. in order
+        self.data = {}  # For storing dep. var.
         self.dep_vars = []  # For storing dep. var. in order
+        self.ind_vars = []  # For storing ind. var. in order
+        self.names = {}  # For accessing variable details by display name
 
         self.num_t_axes = 0
 
@@ -1677,7 +1777,9 @@ class SweepTest:
         raw_data: np.ndarray,
         columns: str = ":,y0",
         names: typing.Union[None, list[typing.Union[str, None], ...]] = None,
-        units: typing.Union[None, list[typing.Union[str, None, pint.Unit], ...]] = None,
+        units: typing.Union[
+            None, str, pint.Unit, list[typing.Union[str, None, pint.Unit], ...]
+        ] = None,
     ) -> None:
         """Load data from 2D array and parse variable names.
 
@@ -1739,7 +1841,7 @@ class SweepTest:
             treated the same as `names`. Any entries of `None` are treated as
             dimensionless. If `None` is passed instead of a list, the data array
             will not be unit-sensitive, i.e. a pure numpy array with no units.
-        
+
         Raises
         ------
         `KeyError`
@@ -1750,24 +1852,14 @@ class SweepTest:
               of fixed (non-expand) specifiers in `columns`
         """
 
-        if units is not None:
-            raise NotImplementedError("Not implemented yet.")
-            # Unit-sensitive data will require refactoring self.Y into several
-            # arrays, one for each dependent variable, since pint associates one
-            # unit with the entire array, but dependent variables may have
-            # different units
-
         # Create variables
         self._create_vars(self._parse_col_spec(columns), raw_data, names)
 
         # Determine `M_n` and `T_n` for each variable
-        self._calc_sweep_limits(raw_data)
+        self._calc_sweep_limits(raw_data, units)
 
-        # Assign `t` axes if necessary
-        self._assign_t_axes()
-
-        # Create and populate Y array
-        self._create_y_array(raw_data)
+        # Create and populate data arrays in dependent variables
+        self._create_data_arrays(raw_data, units)
 
     @property
     def shape(self):
@@ -1775,158 +1867,156 @@ class SweepTest:
         for i in range(len(self.Y.shape)):
             shape[i] = self.Y.shape[i]
             if self.axes[i] == DependentVariable:
-                shape[DependentVariable] = len(self.dep_vars)
+                shape[DependentVariable] = len(self.data)
             else:
                 shape[self.axes[i].name] = self.Y.shape[i]
         return shape
 
     @property
     def dim(self):
-        return len(self.Y.shape)
+        return len(self.data[0].shape)
 
     def __getitem__(self, idx):
-        """Index the SweepTest by `idx`.
-
-        Several types of indexing are supported:
-
-        1.  Indexing by a scalar dependent variable. If `st` is a `SweepTest`
-            object containing vector-valued output data, the value of a single
-            scalar component of the output can be returned by indexing `st` with
-            either a string (the `name` or `_name` of the desired scalar
-            component) or a `DependentVariable`.
-        2.
-        """
-
         if isinstance(idx, str):
-            # Indexing a scalar component of the output
-            if idx in self._names:
-                if isinstance(self._names[idx], DependentVariable):
-                    return self[self._names[idx]]
+            # Indexing a DependentVariable by name or id
+            if idx in self.ids:
+                if isinstance(self.ids[idx], DependentVariable):
+                    return self[self.ids[idx]]
                 else:
-                    raise IndexError(
-                        "Cannot index by independent variable: '" + idx + "'"
-                    )
+                    error_desc = f"'{idx}' is an independent variable"
             elif idx in self.names:
-                return self[self.names[idx]._name]
+                if isinstance(self.names[idx], DependentVariable):
+                    return self[self.names[idx]]
+                else:
+                    error_desc = f"'{idx}' is an independent variable"
             else:
-                raise IndexError("No variable named " + idx)
-        elif isinstance(idx, DependentVariable):  # Scalar index by a dependent variable
-            if idx in self.dep_vars and idx._name in self._names:
+                error_desc = f"no variable named {idx}"
+            raise IndexError(f"Failed to index by string: {error_desc}")
+        elif isinstance(idx, int):
+            # Indexing a DependentVariable by position
+            return self[self.data[idx]]
+        elif isinstance(idx, DependentVariable):
+            # Scalar index by a dependent variable
+            if idx in self.data:
                 _st = SweepTest()
                 for iv in self.ind_vars:
                     iv_copy = iv.copy()
                     _st.ind_vars.append(iv_copy)
                     _st.axes[iv_copy.axis] = iv_copy
                     _st.names[iv_copy.name] = iv_copy
-                    _st._names[iv_copy._name] = iv_copy
-                    if iv_copy.trial is not None:
-                        trial_copy = Trial(iv_copy)
-                        trial_copy.axis = iv.trial.axis
-                        trial_copy.trials = iv.trial.trials
-                        _st.axes[trial_copy.axis] = trial_copy
+                    _st.ids[iv_copy.id] = iv_copy
+
+                    trial_copy = Trial(iv_copy)
+                    trial_copy.axis = iv.trial.axis
+                    trial_copy.trials = iv.trial.trials
+                    _st.axes[trial_copy.axis] = trial_copy
+                    _st.names[trial_copy.name] = trial_copy
+                    _st.ids[trial_copy.id] = trial_copy
                 dv = idx.copy()
                 dv.idx = 0
-                _st.dep_vars.append(dv)
+                _st.data.append(dv)
                 _st.names[dv.name] = dv
-                _st._names[dv._name] = dv
+                _st.ids[dv.id] = dv
                 _st.P = 1
                 _st.N = self.N
                 _st.num_t_axes = self.num_t_axes
                 return _st
             else:
-                raise IndexError("No such dependent variable: " + str(idx))
-        elif isinstance(idx, int) or isinstance(idx, float):
-            if self.dim == 1:
-                if isinstance(idx, int):
-                    return self[(idx,)]
-                else:
-                    return self[(np.array([idx]),)]
-            else:
-                raise IndexError(
-                    "Scalar indexing not supported for {n:d}D array".format(n=self.dim)
-                )
-        elif isinstance(idx, tuple):
-            if sum([1 if isinstance(i, type(Ellipsis)) else 0 for i in idx]) > 1:
-                raise IndexError("An index can only have a single ellipsis.")
-            if len(idx) != self.dim:
-                if ... in idx:
-                    # Expand the Ellipsis
-                    _pos = idx.index(...)
-                    return self[
-                        idx[:_pos]
-                        + (slice(None),) * (self.dim - len(idx) + 1)
-                        + idx[_pos + 1 :]
-                    ]
-                elif len(idx) < self.dim:
-                    # Pad the end of the index with empty slices
-                    return self[idx + (slice(None),) * (self.dim - len(idx))]
-                else:
-                    raise IndexError(
-                        "Too many indices ({0:d}) for {1:d}D array".format(
-                            len(idx),
-                            self.dim,
-                        )
-                    )
-            else:
-                idx_dict = {self.axes[i].name: item for i, item in enumerate(idx)}
-                idx_dict[DependentVariable] = self.dep_vars
-                return self[idx_dict]
-                _has_adv_idx = False
-                _adv_idxs = []
-                _adv_idxs_contig = True
-                for i, item in enumerate(idx):
-                    if isinstance(item, list) or isinstance(item, np.ndarray):
-                        _has_adv_idx = True
-                        _adv_idxs.append(i)
-                        if len(_adv_idxs) > 1:
-                            _adv_idxs_contig = (
-                                _adv_idxs_contig and (i - _adv_idxs[-2]) == 1
-                            )
-                if _has_adv_idx:
-                    return self._do_adv_idx(idx, _adv_idxs, _adv_idxs_contig)
-                else:
-                    return self._do_basic_idx(idx)
+                raise IndexError(f"Failed to index by DependentVariable: {str(idx)}")
         elif isinstance(idx, dict):
             _idx = [slice(None) for i in range(self.dim)]
-            for key in idx:
-                if key in self._names:
-                    _idx[self._names[key].axis] = idx[key]
-                elif key in self.names:
-                    _idx[self.names[key].axis] = idx[key]
-                elif key == DependentVariable:
-                    if self.P > 0:
-                        _idx[self.N] = idx[key]
+
+            # Create list of dependent variables to include in the output
+            output_dv = []
+
+            def _extract_dvs(idx_obj):
+                for idx_i in idx_obj:
+                    if idx_i in self.ids:
+                        output_dv.append(self.ids[idx[DependentVariable]])
+                    elif idx[DependentVariable] in self.names:
+                        output_dv.append(self.names[idx[DependentVariable]])
+                    elif idx[DependentVariable] in self.data:
+                        output_dv.append(idx[DependentVariable])
                     else:
                         raise IndexError(
-                            "Cannot index by dependent variable; output is "
-                            "already scalar."
+                            f"Failed to index by dependent variable: {idx[DependentVariable]}"
                         )
+
+            if DependentVariable in idx:
+                if isinstance(idx[DependentVariable], str) or isinstance(
+                    idx[DependentVariable], DependentVariable
+                ):
+                    _extract_dvs([idx[DependentVariable]])
+                elif isinstance(idx[DependentVariable], list) or isinstance(
+                    idx[DependentVariable], tuple
+                ):
+                    _extract_dvs(idx[DependentVariable])
+                else:
+                    raise IndexError(
+                        f"Invalid type for key DependentVariable: '{type(idx[DependentVariable])}'"
+                    )
+            else:
+                _extract_dvs(self.data)
+
+            # Create indexing object for numpy
+            indices = [None for i in self.axes]
+            duplicate_err = "Duplicate index for {0:s}"
+            already_err = "Variable {0:s} has already been indexed by a scalar"
+            for key in idx:
+                if key in self.ids:
+                    axis = self.ids[key].axis
+                    if axis is None:
+                        raise IndexError(already_err.format(self.ids[key].name))
+                    elif indices[axis] is None:
+                        indices[axis] = idx[key]
+                    else:
+                        raise IndexError(duplicate_err.format(self.ids[key].name))
+                elif key in self.names:
+                    axis = self.names[key].axis
+                    if axis is None:
+                        raise IndexError(already_err.format(key))
+                    elif indices[axis] is None:
+                        indices[axis] = idx[key]
+                    else:
+                        raise IndexError(duplicate_err.format(key))
+                elif key == DependentVariable:
+                    pass
+                elif key in self.ind_vars:
+                    axis = key.axis
+                    if axis is None:
+                        raise IndexError(already_err.format(key.name))
+                    elif indices[axis] is None:
+                        indices[axis] = idx[key]
+                    else:
+                        raise IndexError(duplicate_err.format(key.name))
                 else:
                     raise IndexError("No variable named " + str(key))
+            for i in range(len(indices)):
+                if indices[i] is None:
+                    indices[i] = slice(None)
 
-            return self[tuple(_idx)]
-        elif idx is Ellipsis:
-            return self[tuple([slice(None) for i in self.Y.shape])]
-        else:
-            raise IndexError("Indexing not supported for type '" + str(type(idx)) + "'")
-
-    @staticmethod
-    def reshape_adv_idx(t: typing.Iterable, N: int, i: int, lv: int = 0):
-        """Reshape advanced index to a broadcastable shape."""
-
-        if lv == 0:
-            if lv == N - 1 - i:
-                return t
+            # Perform indexing operation
+            _has_adv_idx = False
+            _adv_idxs = []
+            _adv_idxs_contig = True
+            for i, item in enumerate(indices):
+                if isinstance(item, list) or isinstance(item, np.ndarray):
+                    _has_adv_idx = True
+                    _adv_idxs.append(i)
+                    if len(_adv_idxs) > 1:
+                        _adv_idxs_contig = _adv_idxs_contig and (i - _adv_idxs[-2]) == 1
+            if _has_adv_idx:
+                return self._do_adv_idx(
+                    output_dv, tuple(indices), _adv_idxs, _adv_idxs_contig
+                )
             else:
-                return [SweepTest.reshape_adv_idx(t_i, N, i, lv + 1) for t_i in t]
+                return self._do_basic_idx(tuple(indices))
         else:
-            if lv == N - 1 - i:
-                return [t]
-            else:
-                return [SweepTest.reshape_adv_idx(t, N, i, lv + 1)]
+            raise IndexError(f"Indexing not supported for type '{str(type(idx))}'")
 
     def _do_adv_idx(
         self,
+        output_dv: list[DependentVariable],
         idx: tuple[typing.Union[int, slice, list, np.ndarray], ...],
         adv_idxs: list[int, ...],
         adv_idx_contig: bool,
@@ -1948,39 +2038,39 @@ class SweepTest:
         for i, item in enumerate(idx):
             if i in adv_idxs:
                 if isinstance(item, list):
-                    for j in item:
-                        if not isinstance(j, int):
-                            raise IndexError(
-                                "Can only index a list of ints; found " + str(type(j))
-                            )
-                    idx_copy.append(
-                        SweepTest.reshape_adv_idx(item, len(adv_idxs), adv_idx_count)
-                    )
-                    new_shape.append(len(item))
-                elif isinstance(item, np.ndarray):
-                    if len(item.shape) != 1:
-                        raise IndexError("Can only index 1D arrays")
+                    item = np.array(item)
 
-                    L = item.size
-                    var = self.axes[i]
-                    if var == DependentVariable:
-                        raise IndexError("Cannot index dependent variable by value")
-                    elif isinstance(var, Trial):
-                        raise IndexError("Cannot index '" + var.name + "' by value")
+                item = item.flatten()
+                L = item.size
+                var = self.axes[i]
+                if item.dtype in _FLOAT_TYPES:
+                    # Index by value
+                    if isinstance(var, Trial):
+                        raise IndexError(f"Cannot index '{var.name}' by value")
 
                     M = var.values.size
-                    matches = np.sum(
-                        np.arange(1, M + 1).reshape(M, 1)
-                        * np.isclose(var.values.reshape(M, 1), item),
-                        axis=0,
-                        dtype=np.int32,
+                    matches = np.argwhere(
+                        np.sum(
+                            np.arange(1, M + 1).reshape(M, 1)
+                            * np.isclose(var.values.reshape(M, 1), item),
+                            axis=0,
+                            dtype=np.int32,
+                        )
                     )
-                    valid = matches > 0
-                    matches = list(matches[valid] - 1)
-                    idx_copy.append(
-                        SweepTest.reshape_adv_idx(matches, len(adv_idxs), adv_idx_count)
-                    )
-                    new_shape.append(len(matches))
+                    if matches.size > 0:
+                        matches = list(matches - 1)
+                        idx_copy.append(
+                            reshape_adv_idx(matches, len(adv_idxs), adv_idx_count)
+                        )
+                        new_shape.append(len(matches))
+                    else:
+                        raise IndexError(
+                            f"Found no data matching the provided values for '{var.name}'"
+                        )
+                else:
+                    # Index by position
+                    idx_copy.append(reshape_adv_idx(item, len(adv_idxs), adv_idx_count))
+                    new_shape.append(item.size)
                 adv_idx_count += 1
                 axes_map[i] = new_axis
                 new_axis += 1
@@ -1989,11 +2079,23 @@ class SweepTest:
                     idx_copy.append(slice(item, item + 1, 1))
                     int_axes.append(i)
                     axes_map[i] = None
+                elif isinstance(item, float):
+                    if isinstance(self.axes[i], Trial):
+                        raise IndexError(f"Cannot index '{self.axes[i].name}' by value")
+                    _idx = np.argwhere(np.isclose(self.axes[i].values, item))
+                    if _idx.size == 1:
+                        idx_copy.append(slice(_idx[0], _idx[0] + 1, 1))
+                        int_axes.append(i)
+                        axes_map[i] = None
+                    else:
+                        raise IndexError(
+                            f"Found no data matching the provided values for '{var.name}'"
+                        )
                 else:
                     idx_copy.append(item)
                     axes_map[i] = new_axis
                     new_axis += 1
-                    old_shape = self.Y.shape[i]
+                    old_shape = self.data[0].shape[i]
                     new_shape.append(len([i for i in range(*item.indices(old_shape))]))
         idx_copy = tuple(idx_copy)
         logger.debug("_do_adv_idx: idx_copy == " + str(idx_copy))
@@ -2001,35 +2103,39 @@ class SweepTest:
 
         # Copy data, fix the axes reordering induced by non-contiguous advanced
         # indices, and remove all axes indexed with int
-        data_copy = self.Y[idx_copy]
-        logger.debug("_do_adv_idx: data_copy.shape == " + str(data_copy.shape))
-        logger.debug(
-            "_do_adv_idx: data_copy.OWNDATA == " + str(data_copy.flags["OWNDATA"])
-        )
-        if not adv_idx_contig:
-            ax_order = [None for l in data_copy.shape]
-            count_basic_idx = 0
-            for i in range(len(self.Y.shape)):
-                if i in adv_idxs:
-                    ax_order[i] = adv_idxs.index(i)
-                else:
-                    ax_order[i] = len(adv_idxs) + count_basic_idx
-                    count_basic_idx += 1
-            data_copy = data_copy.transpose(*ax_order)
-        if len(int_axes) > 0:
-            data_copy = data_copy.reshape(*new_shape)
-        logger.debug(
-            "_do_adv_idx: after reshape, data_copy.OWNDATA == "
-            + str(data_copy.flags["OWNDATA"])
-        )
-        logger.debug("_do_adv_idx: axes_map == " + str(axes_map))
-
         _st = SweepTest()
-        _st.Y = data_copy
         self._do_copy_vars(_st, idx_copy, axes_map)
+        for _dv in output_dv:
+            data_copy = _dv.data[idx_copy]
+            logger.debug(f"_do_adv_idx: data_copy.shape == {str(data_copy.shape)}")
+            if not adv_idx_contig:
+                ax_order = [None for l in data_copy.shape]
+                count_basic_idx = 0
+                for i in range(len(_dv.data.shape)):
+                    if i in adv_idxs:
+                        ax_order[i] = adv_idxs.index(i)
+                    else:
+                        ax_order[i] = len(adv_idxs) + count_basic_idx
+                        count_basic_idx += 1
+                data_copy = data_copy.transpose(*ax_order)
+            if len(int_axes) > 0:
+                data_copy = data_copy.reshape(*new_shape)
+            logger.debug(
+                "_do_adv_idx: after reshape, data_copy.OWNDATA == "
+                + str(data_copy.flags["OWNDATA"])
+            )
+            logger.debug("_do_adv_idx: axes_map == " + str(axes_map))
+            new_dv = _dv.copy(data_copy)
+            _st.data.append(new_dv)
+            _st.names[new_dv.name] = new_dv
+            _st.ids[new_dv.id] = new_dv
         return _st
 
-    def _do_basic_idx(self, idx: tuple[typing.Union[int, slice], ...]):
+    def _do_basic_idx(
+        self,
+        output_dv: list[DependentVariable],
+        idx: tuple[typing.Union[int, slice], ...],
+    ):
         """Perform basic indexing on `self`."""
 
         logger.debug("_do_adv_idx: idx == " + str(idx))
@@ -2037,18 +2143,23 @@ class SweepTest:
         # Convert all advanced indexes to broadcastable shapes. Raise error if
         # a non-flat index is encountered.
         axes_map = {}
-        new_axis = 0
+        remaining_axes = 0
         for i, item in enumerate(idx):
             if isinstance(item, int):
                 axes_map[i] = None
             else:
-                axes_map[i] = new_axis
-                new_axis += 1
+                axes_map[i] = remaining_axes
+                remaining_axes += 1
         logger.debug("_do_adv_idx: axes_map == " + str(axes_map))
 
         _st = SweepTest()
-        _st.Y = self.Y[idx].copy()
         self._do_copy_vars(_st, idx, axes_map)
+        for _dv in output_dv:
+            data_copy = _dv.data[idx]
+            new_dv = _dv.copy(data_copy)
+            _st.data.append(new_dv)
+            _st.names[new_dv.name] = new_dv
+            _st.ids[new_dv.id] = new_dv
         return _st
 
     def _do_copy_vars(self, _st, idx, axes_map):
@@ -2057,7 +2168,7 @@ class SweepTest:
         #     require, at most, transformations to their trial metadata.
         #   - independent variables that were previously scalar indexed or are
         #     scalar indexed in the current indexing operation are stored in all
-        #     metadata collections (names, _names, ind_vars) except `axes`
+        #     metadata collections (names, ids, ind_vars) except `axes`
         N = 0
         for iv in self.ind_vars:
             iv_copy = iv.copy()
@@ -2070,7 +2181,7 @@ class SweepTest:
             else:
                 raise IndexError("Unexpected type: " + str(type(idx_obj)))
             _st.names[iv_copy.name] = iv_copy
-            _st._names[iv_copy._name] = iv_copy
+            _st.ids[iv_copy.id] = iv_copy
             _st.ind_vars.append(iv_copy)
             if iv_copy.axis is not None:
                 _st.axes[iv_copy.axis] = iv_copy
@@ -2091,101 +2202,43 @@ class SweepTest:
                 if axes_map[iv.t_axis] is not None:
                     _st.axes[axes_map[iv.t_axis]] = trial_copy
                 _st.names[trial_copy.name] = trial_copy
-                _st._names[trial_copy._name] = trial_copy
+                _st.ids[trial_copy.id] = trial_copy
         _st.N = N
-
-        # Copy DependentVariables
-        if self.dep_vars[0].axis is None:  # Previously indexed by a scalar
-            dv_copy = self.dep_vars[0].copy()
-            dv_copy.idx = None
-            dv_copy.axis = None#axes_map[self.dep_vars[0].axis]
-            _st.dep_vars.append(dv_copy)
-            _st.P = 0
-        elif axes_map[self.dep_vars[0].axis] is None:  # Currently indexed by a scalar
-            _dep_idx = idx[self.dep_vars[0].axis]
-            if isinstance(_dep_idx, slice):
-                _dep_idx = _dep_idx.indices(len(self.dep_vars))[0]
-            dv_copy = self.dep_idx[_dep_idx].copy()
-            dv_copy.axis = None
-            dv_copy.idx = None
-            _st.dep_vars.append(dv_copy)
-            _st.names[dv_copy.name] = dv_copy
-            _st._names[dv_copy._name] = dv_copy
-            _st.P = 0
-        else:
-            old_axis = self.dep_vars[0].axis
-            new_axis = axes_map[old_axis]
-            if isinstance(idx[old_axis], slice):
-                _dep_idx = [i for i in range(*idx[old_axis].indices(self.P))]
-                _st.P = len(_dep_idx)
-            else:
-                _dep_idx = np.array(idx[old_axis]).flatten()
-                _st.P = _dep_idx.size
-            for i, _dep_idx_i in enumerate(_dep_idx):
-                dv_copy = self.dep_idx[_dep_idx_i].copy()
-                dv_copy.axis = new_axis
-                dv_copy.idx = i
-                _st.dep_vars.append(dv_copy)
-                _st.names[dv_copy.name] = dv_copy
-                _st._names[dv_copy._name] = dv_copy
-                _st.dep_idx[i] = dv_copy
-            _st.axes[new_axis] = DependentVariable
         return
 
-    def _create_y_array(self, raw_data):
+    def _create_data_arrays(self, raw_data):
         # Create array of row indices, used for calculating the indexing array
         rows = np.arange(raw_data.shape[0], dtype=np.int32)
         M = []
-        T = []
-
         shape = []
-        idx_shape = []
+        curr_axis = 0
         for iv in self.ind_vars:
-            shape.append(iv.values.size)
-            idx_shape.append(iv.values.size)
+            shape.append(iv.Mn)
+            M.append((rows % (iv._blocksize)) // iv._mult)
+            iv.axis = curr_axis
+            self.axes[curr_axis] = iv
+            curr_axis += 1
+
+            if iv.Tn > 1:
+                shape.append(iv.Tn)
+                M.append((rows // iv._blocksize) % iv.Tn)
+                iv.trial.axis = curr_axis
+                self.axes[curr_axis] = iv.trial
+                curr_axis += 1
             logger.debug(
                 "Blocksize:" + str(iv._blocksize) + ", multiplicity: " + str(iv._mult)
             )
-            M.append((rows % (iv._blocksize)) // iv._mult)
 
-        shape.append(len(self.dep_idx))
-        idx_shape.append(1)
+        row_idx = np.zeros(shape, dtype=np.int32)
+        row_idx[tuple(M)] = rows
 
-        for iv in self.ind_vars:
-            if iv._Tn > 1:
-                shape.append(iv._Tn)
-                idx_shape.append(iv._Tn)
-                T.append((rows // (iv._blocksize)) % iv._Tn)
+        for dv in self.dep_vars:
+            if isinstance(units, list):
+                dv.data = apply_units(raw_data[row_idx, dv.col], units[var.col])
+            else:
+                dv.data = apply_units(raw_data[row_idx, dv.col], units)
 
-        row_idx = np.zeros(idx_shape, dtype=np.int32)
-        row_idx[(*M, 0, *T)] = rows
-
-        col_shape = (self.P, *np.ones(len(T), dtype=np.int32))
-        cols = []
-        for d in sorted(self.dep_idx.keys()):
-            dv = self.dep_idx[d]
-            cols.append(dv.col)
-        col_idx = np.array(cols).reshape(col_shape)
-
-        self.Y = raw_data[row_idx, col_idx]
-
-    def _assign_t_axes(self):
-        """Assign trial axis numbers for all independent variables."""
-
-        ax_count = self.N + 1
-        for iv in self.ind_vars:
-            if iv._Tn > 1:
-                trial = Trial(iv)
-                trial.axis = ax_count
-                trial.trials = np.arange(iv._Tn)
-                self.axes[ax_count] = trial
-                self.names[trial.name] = trial
-                self._names[trial._name] = trial
-                iv.trial = trial
-                ax_count += 1
-                self.num_t_axes += 1
-
-    def _calc_sweep_limits(self, raw_data):
+    def _calc_sweep_limits(self, raw_data, units):
         """Calculate the number of values `M_n` and repetitions `T_n` per
         variable."""
 
@@ -2193,8 +2246,8 @@ class SweepTest:
         possible_sizes = factors(n)
 
         block_sizes = {}
-        for v in self._names:
-            var = self._names[v]
+        for v in self.ids:
+            var = self.ids[v]
             if isinstance(var, IndependentVariable):
                 for b in possible_sizes[1:]:
                     block = raw_data[:b, var.col]
@@ -2207,16 +2260,21 @@ class SweepTest:
         prev_multiplicity = n
         for k in sorted(block_sizes.keys())[-1::-1]:
             var = block_sizes[k]
-            Tn = prev_multiplicity // var._blocksize
-            Mn = np.unique(raw_data[:, var.col]).size
+            var.trials = np.arange(prev_multiplicity // var._blocksize)
+            var.Mn = np.unique(raw_data[:, var.col]).size
+            var._mult = var._blocksize // var.Mn
 
-            prev_multiplicity = var._blocksize // Mn
+            prev_multiplicity = var._mult
 
-            var._Tn = Tn
-            var.values = raw_data[0 : var._blocksize : prev_multiplicity, var.col]
-            var._Mn = Mn
-            var._mult = prev_multiplicity
-            logger.debug("Var " + var.name + ": Tn=" + str(Tn) + ", Mn=" + str(Mn))
+            if isinstance(units, list):
+                var.values = apply_units(
+                    raw_data[0 : var._blocksize : var._mult, var.col], units[var.col]
+                )
+            else:
+                var.values = apply_units(
+                    raw_data[0 : var._blocksize : var._mult, var.col], units
+                )
+            logger.debug(f"Var {var.name}: Tn={var.Tn}, Mn={var.Mn}")
 
     def _create_vars(self, col_spec, raw_data, names):
         """
@@ -2225,10 +2283,12 @@ class SweepTest:
         """
         # Unpack col_spec
         all_spec, ind_spec, dep_spec, exp_spec = col_spec
+
         # Calculate number of specified columns (not including expand)
         tot_cols = len(all_spec)
         expand = not (exp_spec["idx"] is None)
         fixed_cols = tot_cols - (1 if expand else 0)
+
         # Check that the number of variable names matches the number of
         # specified columns
         if names is None:
@@ -2243,8 +2303,9 @@ class SweepTest:
                 hdgs = names
         else:
             raise TypeError("names must be None or a list")
+
         # Verify column spec has the same number of cols as the data and expand
-        # the expand specified (if present)
+        # the expand specifier (if present)
         if fixed_cols != raw_data.shape[1]:
             if expand:
                 # Calculate the number of variables that must be added:
@@ -2291,26 +2352,26 @@ class SweepTest:
         logger.debug("Dep. var indices = " + str(dep_spec))
 
         # Build the dictionaries of variables
+        ids = {}
         axes = {}
-        names = {}
-        _names = {}
-        ind_vars = []
+        data = {}
         dep_vars = []
-        dep_idx = {}
+        ind_vars = []
+        names = {}
 
         N = 0
         P = 0
         _len_dep = len(dep_spec["num"]) + len(dep_spec["non"])
 
-        def create_var(var_type, _name, col):
+        def create_var(var_type, id, col):
             logger.debug(
                 "create_var: var_type = "
-                + " ".join([str(var_type), "_name =", _name, "col =", str(col)])
+                + " ".join([str(var_type), "id =", id, "col =", str(col)])
             )
 
             # Create a variable and fill out the properties
             var = var_type()
-            var._name = _name
+            var.id = id
             var.col = col
             var.name = f"_Col{var.col}" if hdgs[var.col] is None else str(hdgs[var.col])
 
@@ -2319,21 +2380,18 @@ class SweepTest:
 
             # Store the variable in the dictionaries
             if isinstance(var, IndependentVariable):
-                var.axis = N
                 ind_vars.append(var)
-                axes[var.axis] = var
+                var.trial = Trial(var)
+                ids[var.trial.id] = var.trial
+                names[var.trial.name] = var.trial
+                N += 1
             else:
-                if _len_dep > 1:
-                    logger.debug("_len_dep > 1; N = " + str(N))
-                    var.axis = N
-                    var.idx = P
-                    dep_idx[var.idx] = var
-                else:
-                    var.axis = None
-                    var.idx = None
+                var.idx = P
+                data[P] = var
                 dep_vars.append(var)
+                P += 1
+            ids[var.id] = var
             names[var.name] = var
-            _names[var._name] = var
 
         for i in sorted(ind_spec["num"].keys()):
             create_var(
@@ -2341,42 +2399,35 @@ class SweepTest:
                 "x{0:d}".format(i),
                 ind_spec["num"][i],
             )
-            N += 1
         for i, col in enumerate(ind_spec["non"]):
             create_var(
                 IndependentVariable,
                 "x{0:d}".format(ind_spec["max_number"] + 1 + i),
                 col,
             )
-            N += 1
         for i in sorted(dep_spec["num"].keys()):
             create_var(
                 DependentVariable,
                 "y{0:d}".format(i),
                 dep_spec["num"][i],
             )
-            P += 1
         for i, col in enumerate(dep_spec["non"]):
             create_var(
                 DependentVariable,
                 "y{0:d}".format(dep_spec["max_number"] + 1 + i),
                 col,
             )
-            P += 1
         logger.debug("axes are " + str(axes))
 
         # Parsing succeeded; store the temporary variables in self
         self.N = N
-        if _len_dep > 1:
-            # Allocate an axis for the dependent variable components
-            axes[self.N] = DependentVariable
-            self.P = P
-        self.names = names
+        self.P = P
         self.axes = axes
-        self._names = _names
-        self.ind_vars = ind_vars
+        self.data = data
         self.dep_vars = dep_vars
-        self.dep_idx = dep_idx
+        self.ids = ids
+        self.ind_vars = ind_vars
+        self.names = names
         return
 
     @staticmethod
@@ -2716,7 +2767,7 @@ class FreqSweepTest:
                 self.stress.raw.Y /= self.specimen.area
 
         self.dataLoaded = True
-    
+
     def _check_data_consistency(self):
         if self.disp.raw.N != self.force.raw.N:
             # Mismatched number of independent parameters
@@ -2748,10 +2799,7 @@ class FreqSweepTest:
                 )
             if iv.axis != self.force.raw.names[iv.name].axis:
                 raise DataInconsistentError(
-                    "Found different axis for "
-                    + iv.name
-                    + " in test "
-                    + self.test.name
+                    "Found different axis for " + iv.name + " in test " + self.test.name
                 )
             if iv.t_axis != self.force.raw.names[iv.name].t_axis:
                 raise DataInconsistentError(
@@ -2804,7 +2852,7 @@ class FreqSweepTest:
                 params_to_avg.append(p)
 
         if len(avg_ax) > 0:
-            data = field.raw[{s:0 for s in params_to_avg}]
+            data = field.raw[{s: 0 for s in params_to_avg}]
             for s in params_to_avg:
                 data.names[s].trial.values = ["average"]
             data.Y = np.mean(field.raw, axis=tuple(avg_ax))
@@ -2819,7 +2867,7 @@ class FreqSweepTest:
         -------
         `IndependentVariable`
             frequency data for this test
-        
+
         Raises
         ------
         KeyError
@@ -2846,7 +2894,7 @@ class FreqSweepTest:
         -------
         `IndependentVariable`
             amplitude data for this test
-        
+
         Raises
         ------
         KeyError

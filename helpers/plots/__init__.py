@@ -8,7 +8,7 @@
 #
 # Author:   Connor D. Pierce
 # Created:  2019-03-28 12:46
-# Modified: 2023-02-12 17:39:37
+# Modified: 2023-02-14 05:34:29
 #
 # Copyright (c) 2019-2023 Connor D. Pierce
 #
@@ -56,28 +56,28 @@ default_style = {
     "axes.linewidth": 1.0,
     "axes.prop_cycle": cycler(
         color=[
-            '1f77b4',
-            'ff7f0e',
-            '2ca02c',
-            'd62728',
-            '9467bd',
-            '8c564b',
-            'e377c2',
-            '7f7f7f',
-            'bcbd22',
-            '17becf'
+            "1f77b4",
+            "ff7f0e",
+            "2ca02c",
+            "d62728",
+            "9467bd",
+            "8c564b",
+            "e377c2",
+            "7f7f7f",
+            "bcbd22",
+            "17becf",
         ],
-        marker=['d','^','s','D','P','v','o','<','>','x'],
+        marker=["d", "^", "s", "D", "P", "v", "o", "<", ">", "x"],
     ),
     "axes.titlelocation": "left",
     "axes.titlepad": 0,
     "axes.titley": 0.8,
     "figure.dpi": 768,
-    "figure.figsize": (1.75, 1.666666666667)  # Width & height to allocate per subplot
-    "figure.subplot.left": 0.20   # Axis left position within subplot grid cell
-    "figure.subplot.right": 0.94  # Axis right position within subplot grid cell
-    "figure.subplot.bottom": 0.17 # Axis bottom position within subplot grid cell
-    "figure.subplot.top": 0.90    # Axis top position within subplot grid cell
+    "figure.figsize": (1.75, 1.666666666667),  # Width & height to allocate per subplot
+    "figure.subplot.left": 0.20,  # Axis left position within subplot grid cell
+    "figure.subplot.right": 0.94,  # Axis right position within subplot grid cell
+    "figure.subplot.bottom": 0.17,  # Axis bottom position within subplot grid cell
+    "figure.subplot.top": 0.90,  # Axis top position within subplot grid cell
     "font.size": 10,
     "font.family": "serif",
     "lines.linewidth": 1.5,

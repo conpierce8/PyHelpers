@@ -1,14 +1,13 @@
 #! python3
 # -*- coding: utf-8 -*-
 #
-# __init__.py
+# utils.py
 #
-# init file for the `helpers` package. Sets up scientific unit handling via `pint`
-# and defines some generic useful functions and classes.
+# Collection of utility functions and classes.
 #
 # Author:   Connor D. Pierce
-# Created:  2020-11-24 16:08
-# Modified: 2023-02-13 15:29:57
+# Created:  2023-02-13 15:28:30
+# Modified: 2023-02-13 15:29:22
 #
 # Copyright (c) 2023 Connor D. Pierce
 #
@@ -33,16 +32,28 @@
 # SPDX-License-Identifier: MIT
 
 
-"""
-Utilities for scientific unit handling, input/output of experiment and
-simulation data, and plotting results.
-"""
+__all__ = ["factors", "EmptyObject"]
 
 
-# Imports
-from helpers import io, plots, units
-from helpers.units import ureg, Qty
-from helpers.utils import factors, EmptyObject
+## Functions
+def factors(x):
+    """Calculate all factors of the positive integer `x`."""
+
+    return [i for i in range(1, x + 1) if x % i == 0]
 
 
-__all__ = ["io", "plots", "units", "ureg", "Qty", "factors", "EmptyObject"]
+## Classes
+class EmptyObject:
+    """Generic data container with no instance members.
+
+    Use this class by creating an instance and assigning variables to it, e.g.:
+
+    ```
+    varName = EmptyObject()
+    varName.member1 = 1
+    varName.member2 = "Hello, world!"
+    varName.member3 = ["It's", "nice", "to", "meet", "you."]
+    ```
+    """
+
+    pass

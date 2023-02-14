@@ -685,5 +685,3 @@ def _plot_fs_test_get_data(fs_test, param, averaged):
             raise ValueError("Unknown param: " + param)
     else:
         raise ValueError("Invalid param" + param)
-
-
