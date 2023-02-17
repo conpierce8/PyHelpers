@@ -8,7 +8,7 @@
 #
 # Author:   Connor D. Pierce
 # Created:  2019-03-28 12:46
-# Modified: 2023-02-14 05:34:29
+# Modified: 2023-02-14 05:45:59
 #
 # Copyright (c) 2019-2023 Connor D. Pierce
 #
@@ -37,7 +37,8 @@
 
 
 ## Imports
-from helpers.utils import get_style, nudge, FigureRegistry
+from cycler import cycler
+from helpers.plots.utils import get_style, nudge, FigureRegistry
 
 
 __all__ = [

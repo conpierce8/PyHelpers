@@ -8,7 +8,7 @@
 #
 # Author:   Connor D. Pierce
 # Created:  2019-03-28 12:46
-# Modified: 2023-02-12 21:34:27
+# Modified: 2023-02-14 05:45:03
 #
 # Copyright (c) 2019-2023 Connor D. Pierce
 #
@@ -42,7 +42,8 @@ import logging
 import numpy as np
 import scipy as sp
 
-from helpers.units import ureg, Qty, EmptyObject
+from helpers.units import ureg, Qty
+from helpers.utils import EmptyObject
 from IPython.display import display, Image, Markdown
 from matplotlib import cm, rcParams, pyplot as plt
 from matplotlib.animation import FuncAnimation
