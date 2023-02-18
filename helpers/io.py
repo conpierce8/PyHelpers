@@ -8,7 +8,7 @@
 #
 # Author:   Connor D. Pierce
 # Created:  2019-03-28 12:46
-# Modified: 2023-02-16 21:40:20
+# Modified: 2023-02-18 10:55:21
 #
 # Copyright (c) 2019-2023 Connor D. Pierce
 #
@@ -1763,12 +1763,8 @@ class SweepTest:
         self.ind_vars = []  # For storing ind. var. in order
         self.names = {}  # For accessing variable details by display name
 
-        self.num_t_axes = 0
-
-        # Create scalars that describe the number of inputs (independent
-        # variables) `N` and the number of outputs (dependent variables) `P`
-        self.N = 0
-        self.P = 0
+        self.K = 0  # Counter for calculated dependent variables
+        self._max_id  # Counter for assigning ids to calculated dependent variables
 
         if raw_data is not None:
             self.load(raw_data, columns, names, units)
@@ -1877,6 +1873,179 @@ class SweepTest:
     def dim(self):
         return len(self.axes)
 
+    @property
+    def N(self):
+        """Number of independent variables."""
+        return len(self.ind_vars)
+
+    @property
+    def P(self):
+        return len(self.data)
+
+    def copy(self, shallow=True):
+        """Create a copy of this SweepTest."""
+
+        if shallow:
+            return self[
+                {iv.name: slice(None) for iv in self.ind_vars}
+                + {DependentVariable: self.data}
+            ]
+        else:
+            _st = SweepTest()
+            # Copy all independent variables
+            for iv in self.ind_vars:
+                # Copy variable and trial information
+                _iv = iv.copy()
+                _trial = Trial(_iv)
+                _trial.values = _iv.trial.values.copy()
+                _trial.iv = _iv
+
+                # Add independent variable to all data structures
+                _st.ind_vars.append(_iv)
+                _st.names[_iv.name] = _iv
+                _st.ids[_iv.id] = _iv
+                if _iv.axis is not None:
+                    _st.axes[_iv.axis] = _iv
+
+                # Add trial to all data structures
+                _st.names[_trial.name] = _trial
+                _st.ids[_trial.name] = _trial
+                if _trial.axis is not None:
+                    _st.axes[_trial.axis] = _trial
+            
+            # Copy all dependent variables
+            for dv in self.data:
+                _dv = dv.copy()
+                
+                # Add to all data structures
+                _st.names[_dv.name] = _dv
+                _st.ids[_dv.id] = _dv
+                _st.data.append(_dv)
+            
+            # Copy other SweepTest metadata
+            _st._max_id = self._max_id
+            
+            return _st
+
+    def calculate_new_dv(self, fcn):
+        """Calculate a new dependent variable from the existing variables.
+
+        Uses a user-provided function `fcn` to calculate a new dependent variable from
+        the existing independent and dependent variables. The current independent and
+        dependent variable values are passed as kwargs to `fcn` by name and by id, and
+        independent variable arrays are reshaped to be broadcastable with the dependent
+        variable arrays. The return type of `fcn` should be an array (with or without
+        units) of the same shape as the current dependent variables, a tuple, or a dict.
+        If fcn returns a tuple, the returned value is interpreted as follows:
+        ```
+        (data, [name, [idx, [id]]])
+        ```
+        If `fcn` returns a dict, it must contain the key `"data"`, and may optionally
+        contain the keys `"name"`, `"id"`, `"idx"`.
+
+        If the `name` or `id` are not provided, they are automatically assigned as
+        `_Calc{K}` and `y{new_id}`, respectively, where `K` is a number that is
+        incremented each time a new variable is calculated and `new_id` is an integer
+        chosen to be larger than the maximum `id` existing in the SweepTest. If `idx`
+        is provided, the new DependentVariable is inserted at `self.data[idx]`,
+        otherwise it is appended to `self.data`.
+
+        Parameters
+        ----------
+        `fcn` : `Callable[kwargs]`
+            Function to calculate the new DependentVariable values
+
+        Returns
+        -------
+        `dv` : `DependentVariable`
+            the new `DependentVariable` created
+        """
+
+        _kwargs = {}
+        for dv in self.data:
+            _kwargs[dv.name] = dv.data
+            _kwargs[dv.id] = dv.data
+        for iv in self.ind_vars:
+            _kwargs[iv.name] = reshape_adv_idx(iv.values, self.dim, iv.axis)
+            _kwargs[iv.name] = reshape_adv_idx(iv.values, self.dim, iv.axis)
+
+        ret_val = fcn(**_kwargs)
+
+        if isinstance(new_data, np.ndarray) or isinstance(new_data, Qty):
+            new_data = ret_val
+            new_name = None
+            new_id = None
+            new_idx = len(self.data)
+        elif isinstance(ret_val, tuple):
+            new_data = ret_val[0]
+            new_name = ret_val[1] if len(ret_val > 1) else None
+            new_idx = ret_val[2] if len(ret_val > 2) else None
+            new_id = ret_val[3] if len(ret_val > 3) else len(self.data)
+        elif isinstance(ret_val, dict):
+            new_data = ret_val["data"]
+            new_name = ret_val.get("name", None)
+            new_idx = ret_val.get("idx", None)
+            new_id = ret_val.get("id", len(self.data))
+        else:
+            raise TypeError(f"Expecting array, tuple, or dict; received: {type(ret_val)}")
+
+        if new_name is None:
+            new_name = f"_Calc{self.K}"
+            self.K += 1
+        elif not isinstance(new_name, str):
+            raise TypeError(f"'name' must be a str; received: {type(new_name)}")
+        elif new_name in self.names:
+            raise ValueError(f"name '{new_name}' already exists")
+
+        if new_id is None:
+            new_id = f"y{self._max_id + 1}"
+            self._max_id += 1
+        elif not isinstance(new_name, str):
+            raise TypeError(f"'id' must be a str; received: {type(new_name)}")
+        elif new_id in self.ids:
+            raise ValueError(f"id '{new_id}' already exists")
+
+        if not isinstance(new_idx, int):
+            raise TypeError(f"'idx' must be int; received: {type(new_idx)}")
+
+        dv = DependentVariable()
+        dv.name = new_name
+        dv.id = new_id
+        dv.data = new_data
+        dv.idx = new_idx
+        self.data.insert(new_idx, dv)
+        self.names[new_name] = dv
+        self.ids[new_id] = dv
+        for i in range(len(self.data)):
+            self.data[i].idx = i
+        return dv
+
+    # def average(
+        # self,
+        # idx: typing.Union[Trial, str, list[typing.Union[Trial, str], ...]],
+        # in_place: bool = False,
+    # ):
+        # """Compute the average over all trials of the specified parameter(s).
+
+        # Parameters
+        # ----------
+        # `idx` : `Trial` or iterable of `Trial`s
+            # the parameter(s) over which to compute the average
+        # `in_place` : `bool`
+            # whether to compute the average in-place
+
+        # Returns
+        # -------
+        # `st` : `SweepTest`
+            # if `in_place`, returns `self`, else returns new `SweepTest` with all
+            # dependent variables averaged over the specified parameters
+        # """
+
+        # if in_place:
+            # st = self
+        # else:
+            # st = self.copy()
+
     def __getitem__(self, idx):
         if isinstance(idx, str):
             # Indexing a DependentVariable by name or id
@@ -1918,9 +2087,6 @@ class SweepTest:
                 _st.data.append(dv)
                 _st.names[dv.name] = dv
                 _st.ids[dv.id] = dv
-                _st.P = 1
-                _st.N = self.N
-                _st.num_t_axes = self.num_t_axes
                 return _st
             else:
                 raise IndexError(f"Failed to index by DependentVariable: {str(idx)}")
@@ -2466,10 +2632,9 @@ class SweepTest:
                 "y{0:d}".format(dep_spec["max_number"] + 1 + i),
                 col,
             )
+        self._max_id = dep_spec["max_number"] + len(dep_spec["non"])
 
         # Parsing succeeded; store the temporary variables in self
-        self.N = N
-        self.P = P
         self.data = data
         self.ids = ids
         self.ind_vars = ind_vars
@@ -2766,33 +2931,34 @@ class FreqSweepTest:
         """
 
         data = self.db.get_test_data(self.specimen.name, self.test.name)
-        disp = data["disp"]  # type `SweepTest`
-        forc = data["force"]  # type `SweepTest`
+        self.disp.raw = data["disp"]    # type `SweepTest`
+        self.force.raw = data["force"]  # type `SweepTest`
+
+        def calculate_complex_qty(name, **kwargs):
+            if name == "Displ":
+                qty = self.disp
+            elif name == "Force":
+                qty = self.force
+            data = qty.sensor.toPhysical(
+                kwargs["R"] * np.exp(1j * kwargs["Theta"].to("rad").magnitude),
+                qty.gain,
+            )
+            return {"data": data, "name": name}
 
         if disp is None:
             self._noDisp = True
         else:
-            R = disp["R"]
-            theta = disp["Theta"]
-
-            R.Y = self.disp.sensor.toPhysical(
-                R.Y * np.exp(1j * np.pi * theta.Y / 180) * ureg.volt,
-                gain=self.disp.gain,
+            self.disp.raw.calculate_new_dv(
+                lambda **kwargs: calculate_complex_qty("Displ", **kwargs)
             )
-            self.disp.raw = R
             self._noDisp = False
 
         if forc is None:
             self._noForce = True
         else:
-            R = forc["R"]
-            theta = forc["Theta"]
-
-            R.Y = self.force.sensor.toPhysical(
-                R.Y * np.exp(1j * np.pi * theta.Y / 180) * ureg.volt,
-                gain=self.force.gain,
+            self.force.raw.calculate_new_dv(
+                lambda **kwargs: calculate_complex_qty("Force", **kwargs)
             )
-            self.force.raw = R
             self._noForce = False
 
         if not (self._noDisp or self._noForce):
@@ -2803,14 +2969,20 @@ class FreqSweepTest:
         # Compute stress and strain
         if not self.specimen.noSS:
             if not self._noDisp:
-                self.strain = EmptyObject()
-                self.strain.raw = self.disp.raw[...]
-                self.strain.raw.Y /= self.specimen.length
-
+                self.disp.raw.calculate_new_dv(
+                    lambda **kwargs: {"data": kwargs["Displ"] / self.specimen.length, "name": "Strain"}
+                )
             if not self._noForce:
-                self.stress = EmptyObject()
-                self.stress.raw = self.force.raw[...]
-                self.stress.raw.Y /= self.specimen.area
+                self.force.raw.calculate_new_dv(
+                    lambda **kwargs: {"data": kwargs["Force"] / self.specimen.area, "name": "Stress"}
+                )
+            if not self._noDisp and not self._noForce:
+                self.disp.raw.calculate_new_dv(
+                    lambda **kwargs: {"data": self.force.raw.names["Stress"].data / self.disp.names["Strain"].data, "name": "E*"}
+                )
+                self.force.raw.calculate_new_dv(
+                    lambda **kwargs: {"data": self.force.raw.names["Stress"].data / self.disp.names["Strain"].data, "name": "E*"}
+                )
 
         self.dataLoaded = True
 
@@ -2883,28 +3055,7 @@ class FreqSweepTest:
         if self._noDisp:
             raise DataNotAvailableError("Displ not available for this test")
 
-        if avg:
-            return self._get_avg(self.disp)
-        else:
-            return self.disp.raw
-
-    def _get_avg(self, field):
-        avg_ax = []
-
-        params_to_avg = []
-        for p in ("Amplitude", "Frequency"):
-            if p in field.raw.names and field.raw.names[p].Tn > 1:
-                avg_ax.append(field.raw.names[p].t_axis)
-                params_to_avg.append(p)
-
-        if len(avg_ax) > 0:
-            data = field.raw[{s: 0 for s in params_to_avg}]
-            for s in params_to_avg:
-                data.names[s].trial.values = ["average"]
-            data.Y = np.mean(field.raw, axis=tuple(avg_ax))
-            return data
-        else:
-            return field.raw
+        return self.disp.raw["Displ"]
 
     def get_freq(self):
         """Gets the frequency data for this test.
@@ -2988,10 +3139,7 @@ class FreqSweepTest:
         if self._noForce:
             raise DataNotAvailableError("Force not available for this test")
 
-        if avg:
-            return self._get_avg(self.force)
-        else:
-            return self.force.raw
+        return self.force.raw
 
     def get_strain(self, avg=False):
         """
@@ -3018,10 +3166,7 @@ class FreqSweepTest:
         if self.specimen.noSS or self._noDisp:
             raise DataNotAvailableError("Strain not available for this test")
 
-        if avg:
-            return self._get_avg(self.disp) / self.specimen.length
-        else:
-            return self.strain.raw
+        return self.strain.raw
 
     def get_stress(self, avg=False):
         """
@@ -3048,10 +3193,7 @@ class FreqSweepTest:
         if self.specimen.noSS or self._noForce:
             raise DataNotAvailableError("Stress not available for this test")
 
-        if avg:
-            return self._get_avg(self.force) / self.specimen.area
-        else:
-            return self.stress.raw
+        return self.stress.raw
 
     def get_complex_modulus(self, avg=False):
         """
@@ -3070,4 +3212,7 @@ class FreqSweepTest:
         cross-sectional area is available
         """
 
-        return self.get_stress(avg).Y / self.get_strain(avg).Y
+        if self.specimen.noSS or self._noForce or self._noDisp:
+            raise DataNotAvailableError("Complex modulus not available for this test")
+
+        return self.disp.raw["E*"]
