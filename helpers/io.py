@@ -8,7 +8,7 @@
 #
 # Author:   Connor D. Pierce
 # Created:  2019-03-28 12:46
-# Modified: 2023-02-18 10:55:21
+# Modified: 2023-02-18 15:53:12
 #
 # Copyright (c) 2019-2023 Connor D. Pierce
 #
@@ -315,7 +315,10 @@ if False:
 else:
 
     def reshape_adv_idx(t: typing.Iterable, N: int, i: int):
-        return np.array(t).reshape((len(t),) + (1,) * (N - i - 1))
+        if isinstance(t, pint.Quantity):
+            return t.reshape((len(t),) + (1,) * (N - i -1))
+        else:
+            return np.array(t).reshape((len(t),) + (1,) * (N - i - 1))
 
 
 ## Exceptions
@@ -618,7 +621,8 @@ class Database:
                 elif fileTypes[f] == "frequency sweep":
                     raw_data, hdg = load_data(os.path.join(self._tldir, f), src="exp")
                     cols = Database._get_fs_col_spec(hdg)
-                    self._data[f] = SweepTest(raw_data, cols, hdg)
+                    units = Database._get_fs_units(hdg)
+                    self._data[f] = SweepTest(raw_data, cols, hdg, units)
 
         # Find the requested data in the database and return it
         if testSpec["type"] == "quasi-static":
@@ -672,6 +676,25 @@ class Database:
             else:
                 raise ValueError("Unknown heading: " + h)
         return ",".join(cols)
+
+    @staticmethod
+    def _get_fs_units(hdg):
+        units = []
+        units_dict = {
+            "Frequency": "Hz",
+            "Amplitude": "V",
+            "X": "V",
+            "Y": "V",
+            "R": "V",
+            "Theta": "degrees",
+            "StdDev": "V",
+        }
+        for h in hdg:
+            try:
+                units.append(units_dict[h])
+            except KeyError:
+                raise ValueError("Unknown heading: " + h)
+        return units
 
     def get_file_data(self, path, type):
         """
@@ -1764,7 +1787,7 @@ class SweepTest:
         self.names = {}  # For accessing variable details by display name
 
         self.K = 0  # Counter for calculated dependent variables
-        self._max_id  # Counter for assigning ids to calculated dependent variables
+        self._max_id = 0  # Counter for assigning ids to calculated dependent variables
 
         if raw_data is not None:
             self.load(raw_data, columns, names, units)
@@ -1971,7 +1994,7 @@ class SweepTest:
 
         ret_val = fcn(**_kwargs)
 
-        if isinstance(new_data, np.ndarray) or isinstance(new_data, Qty):
+        if isinstance(ret_val, np.ndarray) or isinstance(ret_val, Qty):
             new_data = ret_val
             new_name = None
             new_id = None
@@ -1984,8 +2007,8 @@ class SweepTest:
         elif isinstance(ret_val, dict):
             new_data = ret_val["data"]
             new_name = ret_val.get("name", None)
-            new_idx = ret_val.get("idx", None)
-            new_id = ret_val.get("id", len(self.data))
+            new_idx = ret_val.get("idx", len(self.data))
+            new_id = ret_val.get("id", None)
         else:
             raise TypeError(f"Expecting array, tuple, or dict; received: {type(ret_val)}")
 
@@ -1993,15 +2016,15 @@ class SweepTest:
             new_name = f"_Calc{self.K}"
             self.K += 1
         elif not isinstance(new_name, str):
-            raise TypeError(f"'name' must be a str; received: {type(new_name)}")
+            raise TypeError(f"`name` must be a str; received: {type(new_name)}")
         elif new_name in self.names:
             raise ValueError(f"name '{new_name}' already exists")
 
         if new_id is None:
             new_id = f"y{self._max_id + 1}"
             self._max_id += 1
-        elif not isinstance(new_name, str):
-            raise TypeError(f"'id' must be a str; received: {type(new_name)}")
+        elif not isinstance(new_id, str):
+            raise TypeError(f"`id` must be a str; received: {type(new_id)}")
         elif new_id in self.ids:
             raise ValueError(f"id '{new_id}' already exists")
 
@@ -2072,14 +2095,16 @@ class SweepTest:
                 for iv in self.ind_vars:
                     iv_copy = iv.copy()
                     _st.ind_vars.append(iv_copy)
-                    _st.axes[iv_copy.axis] = iv_copy
+                    if iv_copy.axis is not None:
+                        _st.axes[iv_copy.axis] = iv_copy
                     _st.names[iv_copy.name] = iv_copy
                     _st.ids[iv_copy.id] = iv_copy
 
                     trial_copy = Trial(iv_copy)
                     trial_copy.axis = iv.trial.axis
                     trial_copy.trials = iv.trial.trials
-                    _st.axes[trial_copy.axis] = trial_copy
+                    if trial_copy.axis is not None:
+                        _st.axes[trial_copy.axis] = trial_copy
                     _st.names[trial_copy.name] = trial_copy
                     _st.ids[trial_copy.id] = trial_copy
                 dv = idx.copy()
@@ -2132,6 +2157,7 @@ class SweepTest:
                 _extract_dvs(self.data)
 
             # Create indexing object for numpy
+            # print(self.axes)
             indices = [None for i in self.axes]
             duplicate_err = "Duplicate index for {0:s}"
             already_err = "Variable {0:s} has already been indexed by a scalar"
@@ -2167,6 +2193,7 @@ class SweepTest:
             for i in range(len(indices)):
                 if indices[i] is None:
                     indices[i] = slice(None)
+            # print(indices)
 
             # Perform indexing operation
             _has_adv_idx = False
@@ -2177,12 +2204,43 @@ class SweepTest:
                 if (
                     isinstance(item, list)
                     or isinstance(item, np.ndarray)
-                    or isinstance(item, pint.Quantity)
                 ):
                     _has_adv_idx = True
                     _adv_idxs.append(i)
                     if len(_adv_idxs) > 1:
                         _adv_idxs_contig = _adv_idxs_contig and (i - _adv_idxs[-2]) == 1
+                elif isinstance(item, pint.Quantity):
+                    if isinstance(self.axes[i], Trial):
+                        raise IndexError(f"Cannot index '{self.axes[i].name}' by value")
+                    try:
+                        N = item.shape
+                        # print("A Quantity with shape", N, ":", item, "at index", i)
+                        # If item has a 'shape' attribute, it wraps an array
+                        if len(N) > 0:
+                            quantity_is_adv = True
+                        else:
+                            quantity_is_adv = False
+                    except AttributeError:
+                        # Item does not have a 'shape' attribute, so it wraps a scalar
+                        quantity_is_adv = False
+                    
+                    if quantity_is_adv:
+                        _has_adv_idx = True
+                        _adv_idxs.append(i)
+                        if len(_adv_idxs) > 1:
+                            _adv_idxs_contig = _adv_idxs_contig and (i - _adv_idxs[-2]) == 1
+                    else:
+                        _idx = np.argwhere(np.isclose(self.axes[i].values, item))
+                        if _idx.size > 1:
+                            indices[i] = _idx[:, 0]
+                            _adv_idxs.append(i)
+                            _has_adv_idx = True
+                            if len(_adv_idxs) > 1:
+                                _adv_idxs_contig = _adv_idxs_contig and (i - _adv_idxs[-2]) == 1
+                        elif _idx.size == 1:
+                            indices[i] = int(_idx[0, 0])
+                        else:
+                            raise IndexError(f"No {self.axes[i]} matched for {item}")
                 elif isinstance(item, float):
                     if isinstance(self.axes[i], Trial):
                         raise IndexError(f"Cannot index '{self.axes[i].name}' by value")
@@ -2209,6 +2267,7 @@ class SweepTest:
         adv_idxs: list[int, ...],
         adv_idx_contig: bool,
     ):
+        # print(idx)
         """Perform advanced indexing on `self`."""
 
         logger.debug("_do_adv_idx: idx == " + str(idx))
@@ -2284,6 +2343,7 @@ class SweepTest:
                     idx_copy.append(item)
                     axes_map[i] = new_axis
                     new_axis += 1
+                    # print(self.data[0].data.shape, i)
                     old_shape = self.data[0].data.shape[i]
                     new_shape.append(len([i for i in range(*item.indices(old_shape))]))
         idx_copy = tuple(idx_copy)
@@ -2319,7 +2379,6 @@ class SweepTest:
             _st.data.append(new_dv)
             _st.names[new_dv.name] = new_dv
             _st.ids[new_dv.id] = new_dv
-            _st.P += 1
         return _st
 
     def _do_basic_idx(
@@ -2328,7 +2387,7 @@ class SweepTest:
         idx: tuple[typing.Union[int, slice], ...],
     ):
         """Perform basic indexing on `self`."""
-
+        # print("basic index:", idx)
         logger.debug("_do_adv_idx: idx == " + str(idx))
 
         # Convert all advanced indexes to broadcastable shapes. Raise error if
@@ -2352,7 +2411,6 @@ class SweepTest:
             _st.data.append(new_dv)
             _st.names[new_dv.name] = new_dv
             _st.ids[new_dv.id] = new_dv
-            _st.P += 1
         return _st
 
     def _do_copy_vars(self, _st, idx, axes_map):
@@ -2403,7 +2461,6 @@ class SweepTest:
                     _st.axes[axes_map[iv.t_axis]] = trial_copy
                 _st.names[trial_copy.name] = trial_copy
                 _st.ids[trial_copy.id] = trial_copy
-        _st.N = N
         return
 
     def _create_data_arrays(self, raw_data, units):
@@ -2434,7 +2491,7 @@ class SweepTest:
 
         for dv in self.data:
             if isinstance(units, list):
-                dv.data = apply_units(raw_data[row_idx, dv.col], units[var.col])
+                dv.data = apply_units(raw_data[row_idx, dv.col], units[dv.col])
             else:
                 dv.data = apply_units(raw_data[row_idx, dv.col], units)
 
@@ -2929,6 +2986,9 @@ class FreqSweepTest:
         """
         Loads the data specified for this test.
         """
+        
+        if self.dataLoaded:
+            return
 
         data = self.db.get_test_data(self.specimen.name, self.test.name)
         self.disp.raw = data["disp"]    # type `SweepTest`
@@ -2945,20 +3005,22 @@ class FreqSweepTest:
             )
             return {"data": data, "name": name}
 
-        if disp is None:
+        if self.disp.raw is None:
             self._noDisp = True
         else:
-            self.disp.raw.calculate_new_dv(
-                lambda **kwargs: calculate_complex_qty("Displ", **kwargs)
-            )
+            if "Displ" not in self.disp.raw.names:
+                self.disp.raw.calculate_new_dv(
+                    lambda **kwargs: calculate_complex_qty("Displ", **kwargs)
+                )
             self._noDisp = False
 
-        if forc is None:
+        if self.force.raw is None:
             self._noForce = True
         else:
-            self.force.raw.calculate_new_dv(
-                lambda **kwargs: calculate_complex_qty("Force", **kwargs)
-            )
+            if "Force" not in self.force.raw.names:
+                self.force.raw.calculate_new_dv(
+                    lambda **kwargs: calculate_complex_qty("Force", **kwargs)
+                )
             self._noForce = False
 
         if not (self._noDisp or self._noForce):
@@ -2968,21 +3030,23 @@ class FreqSweepTest:
 
         # Compute stress and strain
         if not self.specimen.noSS:
-            if not self._noDisp:
+            if not self._noDisp and "Strain" not in self.disp.raw.names:
                 self.disp.raw.calculate_new_dv(
                     lambda **kwargs: {"data": kwargs["Displ"] / self.specimen.length, "name": "Strain"}
                 )
-            if not self._noForce:
+            if not self._noForce and "Stress" not in self.force.raw.names:
                 self.force.raw.calculate_new_dv(
                     lambda **kwargs: {"data": kwargs["Force"] / self.specimen.area, "name": "Stress"}
                 )
             if not self._noDisp and not self._noForce:
-                self.disp.raw.calculate_new_dv(
-                    lambda **kwargs: {"data": self.force.raw.names["Stress"].data / self.disp.names["Strain"].data, "name": "E*"}
-                )
-                self.force.raw.calculate_new_dv(
-                    lambda **kwargs: {"data": self.force.raw.names["Stress"].data / self.disp.names["Strain"].data, "name": "E*"}
-                )
+                if "E*" not in self.disp.raw.names:
+                    self.disp.raw.calculate_new_dv(
+                        lambda **kwargs: {"data": self.force.raw.names["Stress"].data / self.disp.raw.names["Strain"].data, "name": "E*"}
+                    )
+                if "E*" not in self.force.raw.names:
+                    self.force.raw.calculate_new_dv(
+                        lambda **kwargs: {"data": self.force.raw.names["Stress"].data / self.disp.raw.names["Strain"].data, "name": "E*"}
+                    )
 
         self.dataLoaded = True
 
@@ -3080,9 +3144,9 @@ class FreqSweepTest:
                     "No frequency data available for test " + self.test.name
                 )
             else:
-                return self.disp.raw.names["Frequency"]
+                return self.disp.raw.names["Frequency"].values
         else:
-            return self.force.raw.names["Frequency"]
+            return self.force.raw.names["Frequency"].values
 
     def get_ampl(self):
         """Get the amplitude parameter data for this test.
@@ -3107,9 +3171,9 @@ class FreqSweepTest:
                     "No amplitude data available for test " + self.test.name
                 )
             else:
-                return self.disp.raw.names["Amplitude"]
+                return self.disp.raw.names["Amplitude"].values
         else:
-            return self.force.names["Amplitude"]
+            return self.force.names["Amplitude"].values
 
     def get_force(self, avg=False):
         """

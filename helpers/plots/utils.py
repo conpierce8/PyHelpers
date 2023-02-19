@@ -8,7 +8,7 @@
 #
 # Author:   Connor D. Pierce
 # Created:  2019-03-28 12:46
-# Modified: 2023-02-14 05:45:03
+# Modified: 2023-02-18 15:50:13
 #
 # Copyright (c) 2019-2023 Connor D. Pierce
 #
@@ -53,11 +53,58 @@ from scipy.stats import linregress
 
 
 __all__ = [
+    "linewidth_cycler",
+    "linestyle_cycler",
+    "tab20_cycler",
     "get_style",
     "nudge",
     "FigureRegistry",
 ]
 
+
+# Some pre-defined cyclers
+linewidth_cycler = cycler.cycler(
+    linewidth=(1.0, 1.25, 1.5, 1.75, 2.0, 2.25, 2.5, 2.75, 3.0)
+)
+linestyle_cycler = cycler.cycler(
+    linestyle=(
+        (0, (1.0,)),  # solid line
+        (0, (3.7, 1.6)),  # normal dashed
+        (0, (6.4, 1.6, 1.0, 1.6)),  # normal dashed-dotted
+        (0, (1.0, 1.65)),  # normal dotted
+        (0, (3.7, 0.5)),  # tightly dashed
+        (0, (6.4, 0.5, 1.0, 0.5)),  # tightly dashed-dotted
+        (0, (3.7, 3.7)),  # equal dashed
+        (0, (6.4, 3.7, 1.0, 3.7)),  # equal dashed-dotted
+        (0, (3.7, 7.4)),  # loosely dashed
+        (0, (6.4, 7.4, 1.0, 7.4)),  # loosely dashed-dotted
+        (0, (1.0, 3.7)),  # loosely dotted
+    ),
+)
+tab20_cycler = cycler.cycler(
+    color=[
+        "#1f77b4",
+        "#ff7f0e",
+        "#2ca02c",
+        "#d62728",
+        "#9467bd",
+        "#8c564b",
+        "#e377c2",
+        "#7f7f7f",
+        "#bcbd22",
+        "#17becf",
+        "#aec7e8",
+        "#ffbb78",
+        "#98df8a",
+        "#ff9896",
+        "#c5b0d5",
+        "#c49c94",
+        "#f7b6d2",
+        "#c7c7c7",
+        "#dbdb8d",
+        "#9edae5",
+    ],  # modified "tab20"
+)
 
 ## Functions
 def get_style(j, params):

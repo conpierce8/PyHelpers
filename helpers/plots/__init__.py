@@ -8,7 +8,7 @@
 #
 # Author:   Connor D. Pierce
 # Created:  2019-03-28 12:46
-# Modified: 2023-02-14 05:45:59
+# Modified: 2023-02-18 16:00:14
 #
 # Copyright (c) 2019-2023 Connor D. Pierce
 #
@@ -47,6 +47,7 @@ __all__ = [
     "FigureRegistry",
     "default_style",
     "presentation_style",
+    "notebook_style",
 ]
 
 
@@ -57,16 +58,16 @@ default_style = {
     "axes.linewidth": 1.0,
     "axes.prop_cycle": cycler(
         color=[
-            "1f77b4",
-            "ff7f0e",
-            "2ca02c",
-            "d62728",
-            "9467bd",
-            "8c564b",
-            "e377c2",
-            "7f7f7f",
-            "bcbd22",
-            "17becf",
+            "#1f77b4",
+            "#ff7f0e",
+            "#2ca02c",
+            "#d62728",
+            "#9467bd",
+            "#8c564b",
+            "#e377c2",
+            "#7f7f7f",
+            "#bcbd22",
+            "#17becf",
         ],
         marker=["d", "^", "s", "D", "P", "v", "o", "<", ">", "x"],
     ),
@@ -108,6 +109,7 @@ presentation_style = default_style.copy()
 presentation_style.update(
     {
         "axes.labelsize": 16,
+        "figure.dpi": 192,
         "font.size": 14,
         "xtick.direction": "in",
         "xtick.labelsize": 14,
@@ -117,5 +119,27 @@ presentation_style.update(
         "ytick.labelsize": 14,
         "ytick.major.size": 6,
         "ytick.minor.size": 4,
+    }
+)
+
+notebook_style = default_style.copy()
+notebook_style.update(
+    {
+        "axes.prop_cycle": cycler(
+            color=[
+                "#1f77b4",
+                "#ff7f0e",
+                "#2ca02c",
+                "#d62728",
+                "#9467bd",
+                "#8c564b",
+                "#e377c2",
+                "#7f7f7f",
+                "#bcbd22",
+                "#17becf",
+            ],
+        ),
+        "figure.dpi": 96,
+        "figure.figsize": (5.0, 3.5),
     }
 )

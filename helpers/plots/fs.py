@@ -7,7 +7,7 @@
 #
 # Author:   Connor D. Pierce
 # Created:  2021-03-31 11:40
-# Modified: 2022-09-06 11:50:54
+# Modified: 2023-02-18 15:20:08
 #
 # Copyright (c) 2021-2023 Connor D. Pierce
 #
@@ -37,12 +37,17 @@
 
 ## Imports
 import cycler
+import helpers
 import logging
 import matplotlib as mpl
 import numpy as np
+import pint
+import typing
 
 from helpers.plots import FigureRegistry, nudge, get_style
-from helpers.units import ureg, Qty, EmptyObject
+from helpers.plots.utils import linestyle_cycler, linewidth_cycler
+from helpers.units import ureg, Qty
+from helpers.utils import EmptyObject
 from matplotlib import cm, pyplot as plt
 from matplotlib.animation import FuncAnimation
 from scipy.linalg import lstsq
@@ -409,75 +414,65 @@ def plotModeShapes(fig, files, sens, freqs, animate=False, decomp=None):
 
 
 def plot_fs_test(
-    fs_test,
-    fig,
-    qtys=("f", "E*"),
-    units=("Hz", "MPa"),
-    averaged=False,
-    axes_types=("lin", "lin"),
-    param_subplots=("A", None),
-    param_cycler=cycler.cycler(
-        color=[
-            "1f77b4",
-            "ff7f0e",
-            "2ca02c",
-            "d62728",
-            "9467bd",
-            "8c564b",
-            "e377c2",
-            "7f7f7f",
-            "bcbd22",
-            "17becf",
-            "aec7e8",
-            "ffbb78",
-            "98df8a",
-            "ff9896",
-            "c5b0d5",
-            "c49c94",
-            "f7b6d2",
-            "c7c7c7",
-            "dbdb8d",
-            "9edae5",
-        ],  # modified "tab20"
-    ),
-    trial_cyclers=(
-        cycler.cycler(
-            linestyle=(
-                (0, (1.0,)),  # solid line
-                (0, (3.7, 1.6)),  # normal dashed
-                (0, (6.4, 1.6, 1.0, 1.6)),  # normal dashed-dotted
-                (0, (1.0, 1.65)),  # normal dotted
-                (0, (3.7, 0.5)),  # tightly dashed
-                (0, (6.4, 0.5, 1.0, 0.5)),  # tightly dashed-dotted
-                (0, (3.7, 3.7)),  # equal dashed
-                (0, (6.4, 3.7, 1.0, 3.7)),  # equal dashed-dotted
-                (0, (3.7, 7.4)),  # loosely dashed
-                (0, (6.4, 7.4, 1.0, 7.4)),  # loosely dashed-dotted
-                (0, (1.0, 3.7)),  # loosely dotted
-            ),
-        ),
-        cycler.cycler(linewidth=(1.0, 1.5, 2.0, 3.0, 4.0, 5.0)),
-    ),
+    fs_test: helpers.io.FreqSweepTest,
+    fig: typing.Union[mpl.figure.Figure, mpl.figure.Axes],
+    qtys: tuple[str, str] = ("f", "E*"),
+    units: tuple[str, str] = ("Hz", "MPa"),
+    averaged: bool = False,
+    axes_types: tuple[str, str] = ("lin", "lin"),
+    subplot_params: typing.Union[bool, str, typing.Iterable[str]] = False,
+    param_vals: None or tuple[tuple[str, ...], list[tuple[float, ...]]] = None,
+    param_cycler: cycler.cycler = linestyle_cycler,
+    trial_cycler: cycler.cycler = linewidth_cycler,
 ):
-    """Plots the results of a frequency-sweep test.
+    """Plot the results of a frequency-sweep test.
+
+    By default, this method plots all data contained in the FreqSweepTest, with
+    the data separated so that each unique combination of parameters and each
+    unique trial of that parameter combination is represented by its own curve.
+
+    The data is plotted on a single `Axes` by default. If an `Figure` object is
+    passed to the `fig` argument, the plots can be separated onto automatically-
+    generated subplots by supplying `subplot_params=True`. If an `Axes` object
+    is passed to the `fig` argument, `subplot_params` is ignored.
+
+    The default is to plot the data for all parameters; however, the set of
+    parameters plotted can be restricted by `param_vals` argument. The value
+    passed to this argument should be a 2-`tuple`. `param_vals[0]` should be an
+    `N_param`-tuple of `str` that names the parameters used to restrict the
+    plotting. `param_vals[1]` should be a list of `N_param`-tuples of floats,
+    where each entry identifies a combination of parameters to be plotted. All
+    parameter values will be included for any parameter in `fs_test` not named
+    in `param_vals[0]`.
+
+    The format of the plots can be controlled with the `param_cycler` and
+    `trial_cycler` arguments.
 
     Parameters
     ----------
-    fs_test : FreqSweepTest
-    fig : matplotlib.figure.Figure or matplotlib.axes.Axes
-    qtys : (str, str)
-        The quantities ("f", "A", "u", "F", "E") to plot on the x- and y-axes.
-        The phasor values "u", "F", and "E" can be suffixed with "*", "'", or
-        "''" to plot the magnitude, real, or imaginary parts, respectively.
-        If no suffix is given, the magnitude is assumed.
-    units : (<str or pint.Unit>, <str or pint.Unit>)
-        The units in which to plot.
-    subplots : None or tuple(str, dict(float: matplotlib.axes.Axes))
-        The quantity to use for splitting into subplots, or `None` to plot all
-        results on the same axes
-    axes_types : tuple of (str, str)
-        The type of axis ("lin" or "log") for the x- and y-axis
+    `fs_test` : data to be plotted
+    `fig` : plot object where the data will be displayed
+    `qtys` : The quantities to plot on the x- and y-axes. Allowable values are
+             ("f", "A", "u", "F", "E", "d") for frequency, amplitude,
+             displacement, force, modulus, and loss angle, respectively. The
+             phasor values "u", "F", and "E" can be suffixed with "*", "'", or
+             "''" to plot the magnitude, real, or imaginary parts, respectively.
+             If no suffix is given, the magnitude is assumed.
+    `units` : units in which to plot the data
+    `averaged` : whether to take the average over all trials or trials of a
+                 specified variable
+    `axes_types` : scaling ("lin" or "log") for the x- and y-axis
+    `subplot_params` : parameter(s) to use for splitting into subplots
+    `param_vals` : restrict the data plotted to only these parameter value(s)
+    `param_cycler` : style to distinguish between parameter values
+    `trial_cycler` : style to distinguish between trial numbers
     """
+
+    if averaged:
+        raise NotImplementedError("averaging is not implemented yet")
+
+    if subplot_params and not isinstance(fig, mpl.figure.Figure):
+        raise ValueError("fig must be a Figure to use subplots")
 
     valid_x_qtys = ("f", "A")
     valid_y_qtys = (
@@ -497,9 +492,9 @@ def plot_fs_test(
     )
     x_qty, y_qty = qtys
     if not x_qty in valid_x_qtys:
-        raise ValueError("Invalid x_qty")
+        raise ValueError("Invalid quantity for x axis")
     if not y_qty in valid_y_qtys:
-        raise ValueError("Invalid y_qty")
+        raise ValueError("Invalid quantity for y axis")
 
     plt_cmd_str = None
     if axes_types == ("lin", "lin"):
@@ -522,78 +517,104 @@ def plot_fs_test(
     if not _plot_fs_test_check_params(fs_test, y_qty):
         raise ValueError("fs_test does not have the required y_qty")
 
-    # Extract the data to be plotted
-    x_unit, y_unit = units
-    x_data, x_ind, x_label = _plot_fs_test_get_data(fs_test, x_qty, averaged)
-    y_data, y_ind, y_label = _plot_fs_test_get_data(fs_test, y_qty, averaged)
-    x_data.ito(x_unit)
-    y_data.ito(y_unit)
-
-    handles = []
-    plt_kwargs = {}
-
-    if param_subplots is None:
-        if isinstance(fig, mpl.figure.Figure):
-            ax = fig.add_subplot(1, 1, 1)
+    # Fill out the matrix of parameter value combinations if there are unspecified
+    # parameters
+    all_params = [iv.name for iv in fs_test.disp.raw.ind_vars]
+    if x_qty == "f":
+        all_params.remove("Frequency")
+    else:
+        all_params.remove("Amplitude")
+    translation = {"f": "Frequency", "A": "Amplitude"}
+    if param_vals is None:
+        _param_vals = (tuple(all_params), _get_param_matrix(fs_test, all_params))
+    else:
+        if len(param_vals[0]) == len(all_params):
+            _param_vals = (tuple([translation[s] for s in param_vals[0]]), param_vals[1])
         else:
-            ax = fig
+            unspecified = all_params.copy()
+            for p in param_vals[0]:
+                unspecified.remove(p)
+            unspecified_vals = _get_param_matrix(fs_test, unspecified)
+            _param_vals = (tuple([translation[s] for s in param_vals[0]]) + tuple([translation[s] for s in unspecified]), [p + p2 for p in param_vals[0] for p2 in unspecified_vals])
+
+    # Determine a suitable layout of subplots that makes each subplot as close to square
+    # as possible
+    if subplot_params:
+        N_subplots = len(_param_vals[1])
+        if fig.figsize[0] > fig.figsize[1]:
+            layouts = [(n, int(np.ceil(N_subplots / n))) for n in range(1, int(np.floor(np.sqrt(N_subplots))) + 1)]
+            ratios = np.array([x[1] / x[0] for x in layouts])
+            layout_i = np.argmin(np.abs(ratios - fig.figsize[0] / fig.figsize[1]))
+            layout = layouts[i]
+        else:
+            layouts = [(int(np.ceil(N_subplots / n)), n) for n in range(1, int(np.floor(np.sqrt(N_subplots))) + 1)]
+            ratios = np.array([x[0] / x[1] for x in layouts])
+            layout_i = np.argmin(np.abs(ratios - fig.figsize[1] / fig.figsize[0]))
+            layout = layouts[i]
+        ax = None
+    elif isinstance(fig, mpl.figure.Figure):
+        ax = fig.add_subplot(1, 1, 1)
+    else:
+        ax = fig
+
+    # Create a matrix of trials
+    _trials = _get_trial_matrix(fs_test, _param_vals[0])
+
+    # Do the plotting
+    for i, x, y, x_label, y_label, style in _plot_fs_test_get_slices(fs_test, qtys, units, _param_vals, _trials, param_cycler, trial_cycler):
+        if subplot_params:
+            ax = fig.add_subplot(layout[0], layout[1], i + 1)
 
         plt_cmd = ax.__getattribute__(plt_cmd_str)
+        plt_cmd(x, y, **style)
+        ax.set_xlabel(x_label.format(unit=units[0]))
+        ax.set_ylabel(y_label.format(unit=units[1]))
+    return
 
-        if len(y_data.shape) == 1:
-            handles.append(plt_cmd(x_data.magnitude, y_data.magnitude))
-        else:
-            for slc in _plot_fs_test_get_slices(
-                y_data.shape,
-                x_ind,
-                param_cycler,
-                trial_cyclers,
-                plt_kwargs,
-            ):
-                logger.debug(slc)
-                handles.append(plt_cmd(x_data.magnitude, y_data[slc].magnitude))
-
-        ax.set_xlabel(x_label + " " + x_unit)
-        ax.set_ylabel(y_label + " " + y_unit)
-        # TODO: legend
-    elif not subplots[0] in valid_qtys:
-        raise ValueError("Unsupported quantity for subplotting")
-    else:
-
-        pass
-    return handles
-
-
-def _plot_fs_test_get_slices(
-    shape, param_axis, param_cycler, trial_cyclers, plt_kwargs, axis=0, index=[]
-):
-    if axis == param_axis:
-        if axis == len(shape) - 1:
-            yield tuple(index + [slice(None)])
-        else:
-            yield from _plot_fs_test_get_slices(
-                shape,
-                param_axis,
-                param_cycler,
-                trial_cyclers,
-                plt_kwargs,
-                axis + 1,
-                index + [slice(None)],
-            )
-    else:
-        for i in range(shape[axis]):
-            if axis == len(shape) - 1:
-                yield tuple(index + [i])
+def _get_param_matrix(fs_test, params):
+    def get_combos(fs_test, params, lv=0, prefix=tuple()):
+        for v in fs_test.disp.raw.names[params[lv]].values:
+            suffix = (v, )
+            if lv == len(params) - 1:
+                yield prefix + suffix
             else:
-                yield from _plot_fs_test_get_slices(
-                    shape,
-                    param_axis,
-                    param_cycler,
-                    trial_cyclers,
-                    plt_kwargs,
-                    axis + 1,
-                    index + [i],
-                )
+                yield from get_combos(fs_test, params, lv + 1, prefix + suffix)
+    return [combo for combo in get_combos(fs_test, params)]
+
+def _get_trial_matrix(fs_test, params):
+    def get_combos(fs_test, params, lv=0, prefix=tuple()):
+        for v in fs_test.disp.raw.names[params[lv]].trial.trials:
+            suffix = (v, )
+            if lv == len(params) - 1:
+                yield prefix + suffix
+            else:
+                yield from get_combos(fs_test, params, lv + 1, prefix + suffix)
+    return tuple([fs_test.disp.raw.names[p].trial.name for p in params]), [combo for combo in get_combos(fs_test, params)]
+
+def _plot_fs_test_get_slices(fs_test, qtys, units, _param_vals, _trials, param_cycler, trial_cycler):
+    p_iter = param_cycler.__iter__()
+    for i, p_val in enumerate(_param_vals[1]):
+        try:
+            style = p_iter.__next__()
+        except StopIteration:
+            p_iter = param_cycler.__iter__()
+            style = p_iter.__next__()
+        t_iter = trial_cycler.__iter__()
+        for t in _trials[1]:
+            index = dict(zip(_param_vals[0], p_val))
+            index.update(dict(zip(_trials[0], t)))
+            # Extract the data to be plotted
+            x_unit, y_unit = units
+            x_data, x_label = _plot_fs_test_get_data(fs_test, index, qtys[0], False)
+            y_data, y_label = _plot_fs_test_get_data(fs_test, index, qtys[1], False)
+            x_data.ito(x_unit)
+            y_data.ito(y_unit)
+            try:
+                style.update(t_iter.__next__())
+            except StopIteration:
+                t_iter = trial_cycler.__iter__()
+                style.update(t_iter.__next__())
+            yield i, x_data.magnitude, y_data.magnitude, x_label, y_label, style
 
 
 def _plot_fs_test_check_params(fs_test, param):
@@ -617,69 +638,72 @@ def _plot_fs_test_check_params(fs_test, param):
         raise ValueError("Invalid param" + param)
 
 
-def _plot_fs_test_get_data(fs_test, param, averaged):
+def _plot_fs_test_get_data(fs_test, index, param, averaged):
+    index_copy = index.copy()
+    # print(index)
+    for k in index:
+        if fs_test.disp.raw.names[k].axis is None:
+            del index_copy[k]
+    # print(index_copy)
+
     if param == "f":
-        return fs_test.get_freq() + ("Frequency",)
+        return fs_test.get_freq(), "Frequency [{unit}]"
     elif param == "A":
-        return fs_test.get_ampl() + ("Amplitude",)
-    elif param == "d":
-        E_complex = fs_test.get_complex_modulus(averaged)
-        return (
-            (
-                np.imag(E_complex.magnitude)
-                / np.real(E_complex.magnitude)
-                * ureg.dimensionless
-            ),
-            "Loss factor, $\\eta$",
-        )
-    elif param.startswith("E"):
-        E_complex = fs_test.get_complex_modulus(averaged)
-        if param == "E" or param == "E*":
+        return fs_test.get_ampl(), "Amplitude [{unit}]"
+    elif param == "d" or param.startswith("E"):
+        E_complex = fs_test.get_complex_modulus(averaged)[index_copy]
+        if param == "d":
             return (
-                np.abs(E_complex) * E_complex.units,
-                "Complex modulus magnitude, $|E^*|$",
-            )
-        elif param == "E'":
-            return (
-                np.real(E_complex.magnitude) * E_complex.units,
-                "Storage Modulus, $E'$",
-            )
-        elif param == "E''":
-            return (
-                np.imag(E_complex.magnitude) * E_complex.units,
-                "Loss modulus, $E''$",
+                np.imag(E_complex.data[0].data.magnitude) / np.real(E_complex.data[0].data.magnitude) * ureg.dimensionless,
+                "Loss factor, $\\tan{{\\delta}}$",
             )
         else:
-            raise ValueError("Unknown param: " + param)
+            if param == "E" or param == "E*":
+                return (
+                    np.abs(E_complex.data[0].data),
+                    "Complex modulus magnitude, $|E^*|$ [{unit}]",
+                )
+            elif param == "E'":
+                return (
+                    np.real(E_complex.data[0].data.magnitude) * E_complex.data[0].data.units,
+                    "Storage Modulus, $E'$ [{unit}]",
+                )
+            elif param == "E''":
+                return (
+                    np.imag(E_complex.data[0].data.magnitude) * E_complex.data[0].data.units,
+                    "Loss modulus, $E''$ [{unit}]",
+                )
+            else:
+                raise ValueError("Unknown param: " + param)
     elif param.startswith("u"):
-        u_complex = fs_test.get_disp(averaged)
+        u_complex = fs_test.get_disp(averaged)[index_copy]
         if param == "u" or param == "u*":
-            return np.abs(u_complex) * u_complex.units, "Displacement magnitude"
+            return np.abs(u_complex.data[0].data), "Displacement magnitude [{unit}]"
         elif param == "u'":
             return (
-                np.real(u_complex.magnitude) * u_complex.units,
-                "Displacement (real)",
+                np.real(u_complex.data[0].data.magnitude) * u_complex.data[0].data.units,
+                "Displacement (real) [{unit}]",
             )
         elif param == "u''":
             return (
-                np.imag(u_complex.magnitude) * u_complex.units,
-                "Displacement (imag)",
+                np.imag(u_complex.data[0].data.magnitude) * u_complex.data[0].data.units,
+                "Displacement (imag) [{unit}]",
             )
         else:
             raise ValueError("Unknown param: " + param)
     elif param.startswith("F"):
-        F_complex = fs_test.get_force(averaged)
+        F_complex = fs_test.get_force(averaged)[index_copy]
         if param == "F" or param == "F*":
-            return np.abs(F_complex), "Force magnitude"
+            return np.abs(F_complex.data[0].data), "Force magnitude [{unit}]"
         elif param == "F'":
             return (
-                np.real(F_complex.magnitude) * F_complex.units,
-                "Force (real)",
+                np.real(F_complex.data[0].data.magnitude) * F_complex.data[0].data.units,
+                "Force (real) [{unit}]",
             )
         elif param == "F''":
             return (
-                np.imag(F_complex.magnitude) * F_complex.units,
-                "Force (imag)",
+                np.imag(F_complex.data[0].data.magnitude) * F_complex.data[0].data.units,
+                "Force (imag) [{unit}]",
             )
         else:
             raise ValueError("Unknown param: " + param)
